@@ -1,0 +1,50 @@
+# ===== Credenciais e segredos (NUNCA versionar) =====
+# Chaves privadas e certificados
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+
+# Diretorio e config do OCI (dados pessoais do usuario)
+.oci/
+**/.oci/
+oci_api_key*
+*ca-bundle*.pem
+kaspersky-ca.pem
+
+# Tokens / sessoes
+*token*
+*.session
+
+# Variaveis de ambiente / segredos
+.env
+.env.*
+*.secret
+secrets.*
+
+# ===== Temporarios e dados =====
+*.tmp
+*.log
+# Dados brutos / amostras (podem conter dados pessoais - LGPD)
+*.csv
+*.csv.gz
+
+# ===== Sistema =====
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ===== Dados de carga / artefatos do projeto (nao versionar) =====
+# Metadados e configs de carga por ano (podem referenciar dados pessoais)
+reg_meta_*.json
+cfg_provider_*.json
+# Comparacoes e dumps
+_cmp_*.txt
+_full_*.csv
+# Scripts de execucao/monitoramento gerados
+monitor_run_*.ps1
+# Prints de consultas (podem exibir dados de tabelas - LGPD)
+imagens/
+*.png

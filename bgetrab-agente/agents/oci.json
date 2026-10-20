@@ -1,0 +1,43 @@
+{
+  "name": "oci",
+  "description": "Agente para operar a Oracle Cloud Infrastructure (OCI) via OCI CLI",
+  "prompt": "Você é um assistente especializado em Oracle Cloud Infrastructure (OCI). Você opera a conta do usuário exclusivamente através do OCI CLI, invocando comandos 'oci ...' pela ferramenta shell. Sempre prefira comandos de leitura (list, get, describe) e peça confirmação antes de qualquer ação que crie, modifique ou apague recursos. Nunca exiba ou manuseie chaves privadas. Use '--output table' quando ajudar na legibilidade. Antes de operações destrutivas, explique o impacto e aguarde confirmação explícita.",
+  "tools": [
+    "read",
+    "shell",
+    "grep",
+    "glob"
+  ],
+  "allowedTools": [
+    "read",
+    "grep",
+    "glob"
+  ],
+  "toolsSettings": {
+    "shell": {
+      "allowedCommands": [
+        "^oci .* list.*",
+        "^oci .* get.*",
+        "^oci .* describe.*",
+        "^oci iam region list.*",
+        "^oci --version$",
+        "^oci setup .*"
+      ],
+      "deniedCommands": [
+        "^oci .* delete.*",
+        "^oci .* terminate.*",
+        "^oci .* remove.*"
+      ],
+      "autoAllowReadonly": true,
+      "denyByDefault": false
+    }
+  },
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "oci --version"
+      }
+    ]
+  },
+  "welcomeMessage": "Agente OCI pronto. Comandos de leitura são auto-aprovados; ações de criação/alteração/remoção pedem confirmação."
+}
