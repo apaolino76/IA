@@ -1154,6 +1154,52 @@ Consultar status (substituir <KEY> pela task-run key do ano desejado):
 Desfecho esperado: SUCCESS com records-written > 0 para cada ano.
 PENDENTE: confirmar desfecho final das tres runs na proxima sessao (sessao OCI expirou
 antes de coletar o resultado terminal; runs estavam RUNNING ao encerrar a sessao).
+
+### DESFECHO DAS RUNS 2004, 2005 E 2006 - SUCCESS - 2026-10-20
+
+Confirmado nesta sessao (2026-10-20) via oci data-integration task-run get. As tres runs
+disparadas em 2026-10-17 (que estavam RUNNING ao encerrar a sessao anterior) terminaram
+com SUCCESS, sem error-message nem termination-errors:
+
+| Ano  | Task-run key | Status  | records-written | Inicio -> Fim (UTC)        | Duracao |
+|------|--------------|---------|-----------------|----------------------------|---------|
+| 2004 | 055c8ee1-fb28-4b61-9dec-d2cc68ec2fbf | SUCCESS | 23.882.368 | 2026-10-17 19:39:07 -> 20:12:58 | ~34 min |
+| 2005 | 3d379bda-f0f4-4d7a-baa0-07b1368480c0 | SUCCESS | 26.272.426 | 2026-10-17 19:40:17 -> 20:34:59 | ~55 min |
+| 2006 | 4cf58190-6bd2-4d6d-8864-d9aff0cab2b1 | SUCCESS | 28.034.326 | 2026-10-17 19:41:25 -> 20:56:28 | ~75 min |
+
+Os registros dos anos 2004, 2005 e 2006 estao carregados na tabela
+V1_FATOS_CAGED_TRABS_AJUSTADO (schema BGETRAB_OAC, ADW producao).
+
+Resumo acumulado de cargas concluidas com ATL v4 (SUCCESS): 2002, 2003, 2004, 2005, 2006.
+Aptos aguardando carga: 1996, 1997, 1999. CSV vazio (pendente origem): 1998.
+Observacao: estas cargas ocorreram ANTES do diagnostico do truncamento de
+DT_COMPETENCIA_MOVIMENTACAO (2026-10-19). Avaliar reprocessamento dos anos afetados
+(1996, 2000, 2001, 2003, 2011) apos a correcao da conversao VARCHAR2->INT no job DARDO.
+
+### CARGAS MANUAIS 1996, 1997 E 1999 - SUCCESS - 2026-10-19 (confirmado 2026-10-20)
+
+Verificado via oci data-integration task-run list/get. Os tres anos foram carregados
+MANUALMENTE por Angelo Cesar Siciliano Paolino em 2026-10-19 (nao disparados pelo assistente).
+Todos SUCCESS, sem error-message:
+
+| Ano  | Task-run key | Status  | records-written | Inicio -> Fim (UTC)        | Duracao |
+|------|--------------|---------|-----------------|----------------------------|---------|
+| 1996 | 8f33155a-dcbe-4d11-afec-ffa8f16d4809 | SUCCESS | 19.157.840 | 2026-10-19 12:03:33 -> 12:29:26 | ~26 min |
+| 1997 | 3fa9ebf1-fcba-4bbe-8d2e-7d0990d170c5 | SUCCESS | 18.876.702 | 2026-10-19 12:53:40 -> 13:17:31 | ~24 min |
+| 1999 | b1b68433-4f63-4bdb-abae-fa4fcff39c39 | SUCCESS | 17.460.452 | 2026-10-19 13:39:19 -> 15:01:22 | ~82 min |
+
+Nota: nessas runs o PARAM_ANO saiu vazio (nas runs anteriores vinha _199601.csv); como o
+PARAMETER_ARQ (CSV do ano) e o que carrega os dados, todas gravaram normalmente.
+
+Resumo acumulado de cargas concluidas (SUCCESS) na V1_FATOS_CAGED_TRABS_AJUSTADO:
+  1996, 1997, 1999, 2002, 2003, 2004, 2005, 2006.
+  Pendente origem (CSV vazio): 1998. Nao carregados ainda: 2000, 2001, 2007-2019.
+
+ATENCAO (truncamento DT_COMPETENCIA_MOVIMENTACAO): a carga de 1996 (2026-10-19) ocorreu no
+mesmo dia do diagnostico do truncamento e 1996 e o ano MAIS afetado (~64% na amostra). Logo,
+os 19,1 mi de registros de 1996 ja estao no ADW com DT_COMPETENCIA_MOVIMENTACAO truncada e
+PRECISAM ser recarregados apos a correcao da conversao VARCHAR2->INT no job DARDO. 1997 e 1999
+estavam limpos na amostra, mas reconferir na varredura completa antes de considerar finalizados.
 ## Como retomar o trabalho em sessoes futuras
 
 Lembrete: o assistente NAO tem memoria entre sessoes. O conhecimento vive nestes
@@ -1622,3 +1668,271 @@ PENDENTE:
 AFETADOS (certos): 1996 (~64%), 2000 (~50%), 2001 (~48%), 2011 (~48%), 2003 (~0,1%).
 LIMPOS na amostra (nao garante arquivo inteiro): 1997,1999,2002,2004-2010,2012-2019.
 1998: CSV vazio (so header) - problema a parte.
+
+### VERIFICACAO DE ADERENCIA - CSVs 2000, 2001 E 2011 (regerados 2026-10-19) - 2026-10-20
+
+Pedido: verificar se os CSVs de 2000, 2001 e 2011 no bucket-bgetrab-prod estao aderentes
+a TODOS os problemas tratados. Os tres foram REGERADOS em 2026-10-19 (versoes novas, posteriores
+ao diagnostico do truncamento), portanto reanalisados do zero (nao vale a classificacao antiga).
+
+Metadados (coletados 2026-10-20):
+| Ano  | Tamanho (bytes)   | Last-modified (UTC)      | Version-id                           |
+|------|-------------------|--------------------------|--------------------------------------|
+| 2000 | 4.416.825.897     | 2026-10-19 18:38:57Z     | 94c7c35f-841d-44e8-bb72-d6ffbcf64a58 |
+| 2001 | 4.655.444.870     | 2026-10-19 18:38:03Z     | e8e9ae52-2cfa-444d-a3dc-b29bdc4fe99f |
+| 2011 | 10.180.601.441    | 2026-10-19 21:38:19Z     | fc16eaf0-86af-4d0e-8103-0c1170a7c112 |
+(2011 mudou de 10.071.483.036 para 10.180.601.441 bytes -> confirma regeracao.)
+
+Varredura via OCI CLI (range: inicio 80 MB + meio 4 MB + fim 4 MB), ~410 mil linhas/ano:
+
+| Criterio                              | 2000           | 2001           | 2011           |
+|---------------------------------------|----------------|----------------|----------------|
+| Estrutura (50 campos)                 | OK (0 desal.)  | OK (0)         | OK (0)         |
+| VL_SALARIO_MENSAL_DECLARADO vazio     | OK (0)         | OK (0)         | OK (0)         |
+| NU_IDADE_TRABALHADOR vazio            | OK (0)         | OK (0)         | OK (0)         |
+| NU_CPF_TRABALHADOR mascarado          | OK (~100%)     | OK (~100%)     | OK (~100%)     |
+| NU_PIS_TRABALHADOR mascarado          | OK (~100%)     | OK (~100%)     | OK (~100%)     |
+| DT_COMPETENCIA_MOVIMENTACAO (AAAAMM)  | FALHA 61,71%   | FALHA 56,62%   | FALHA 32,74%   |
+
+(A unica linha "nao mascarada" por ano e a LINHA DE CABECALHO - header tem NU_CPF/NU_PIS literais, sem '*' - nao PII em claro. Ver correcao do scan_menu.ps1 em 2026-10-20.)
+
+CONCLUSAO: aderentes a 5 dos 6 problemas (desalinhamento, salario, idade, mascara CPF, mascara PIS).
+NAO aderentes ao TRUNCAMENTO de DT_COMPETENCIA_MOVIMENTACAO - defeito presente e em larga escala
+(2000 ~62%, 2001 ~57%, 2011 ~33% das linhas fora de AAAAMM). Esperado: a correcao desse problema
+exige ajustar a conversao VARCHAR2->INT no job DARDO (P_BGE_ETL_001_DW_MIGRACAO_DARDO, view QRY_DADOS)
+e reprocessar a cadeia - o que ainda NAO foi aplicado. O ATL v4 (refletido nesses CSVs) tratou
+salario/idade/desalinhamento/PII, mas NAO o truncamento.
+
+ACAO: NAO carregar 2000, 2001 e 2011 ainda (entrariam no ADW com DT_COMPETENCIA_MOVIMENTACAO
+corrompida, como ja ocorreu com 1996). Corrigir o job DARDO, regerar os CSVs destes anos e so
+entao disparar a TASK_FATOS_CAGED_TRABS_AJUSTADO.
+
+### VARREDURA (AMOSTRAGEM) DE DT_COMPETENCIA_MOVIMENTACAO - TODOS OS ANOS - CONCLUIDA 2026-10-20
+
+Executada via scripts/scan_menu.ps1 (menu interativo), modo Amostragem (inicio 80 MB + meio 4 MB
++ fim 4 MB), foco DT_COMPETENCIA_MOVIMENTACAO. ~400 mil linhas amostradas por ano. Rodada pelo
+usuario em outro terminal; resultados consolidados aqui. Supera a classificacao anterior, que vinha
+so do INICIO dos arquivos (e subestimava anos como 2002 e 2003).
+
+| Ano  | Linhas amostradas | DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM | Situacao |
+|------|-------------------|--------------------------------------------|----------|
+| 1996 | 409.160 | 226.317 (55,31%) | AFETADO |
+| 1997 | 407.654 | 1 (0,00%)        | limpo (amostra) |
+| 1998 | - (CSV vazio)     | -                | SEM DADOS |
+| 1999 | 407.584 | 1 (0,00%)        | limpo (amostra) |
+| 2000 | 412.266 | 254.402 (61,71%) | AFETADO |
+| 2001 | 411.143 | 232.804 (56,62%) | AFETADO |
+| 2002 | 408.480 | 13.456 (3,29%)   | AFETADO |
+| 2003 | 408.817 | 46.983 (11,49%)  | AFETADO |
+| 2004 | 408.792 | 1 (0,00%)        | limpo (amostra) |
+| 2005 | 409.669 | 1 (0,00%)        | limpo (amostra) |
+| 2006 | 410.046 | 1 (0,00%)        | limpo (amostra) |
+| 2007 | 416.142 | 1 (0,00%)        | limpo (amostra) |
+| 2008 | 413.868 | 1 (0,00%)        | limpo (amostra) |
+| 2009 | 414.101 | 1 (0,00%)        | limpo (amostra) |
+| 2010 | 413.425 | 1 (0,00%)        | limpo (amostra) |
+| 2011 | 410.638 | 134.450 (32,74%) | AFETADO |
+| 2012 | 411.916 | 1 (0,00%)        | limpo (amostra) |
+| 2013 | 415.818 | 1 (0,00%)        | limpo (amostra) |
+| 2014 | 413.299 | 1 (0,00%)        | limpo (amostra) |
+| 2015 | 411.774 | 1 (0,00%)        | limpo (amostra) |
+| 2016 | 409.523 | 1 (0,00%)        | limpo (amostra) |
+| 2017 | 409.090 | 1 (0,00%)        | limpo (amostra) |
+| 2018 | 403.632 | 1 (0,00%)        | limpo (amostra) |
+| 2019 | 403.990 | 1 (0,00%)        | limpo (amostra) |
+
+Nota (CORRIGIDA 2026-10-20): em todos os anos a Estrutura (50 campos) deu 0 desalinhamentos.
+O "1" fora de AAAAMM dos anos limpos NAO era artefato de fronteira de bloco - era a LINHA DE
+CABECALHO. O header tem 50 campos e, na coluna 3, o texto literal "DT_COMPETENCIA_MOVIMENTACAO".
+O filtro de descarte do header no scan_menu.ps1 estava com prefixo errado (DT_COMPETENCIA*), mas a
+1a coluna do header e ID_SEQ_FATOS_CAGED_TRAB_AJUS, entao o header escapava e somava 1. CONCLUSAO:
+nos anos limpos o valor REAL de linhas de dados fora de AAAAMM e 0 (o "1" era so o header); nos
+AFETADOS o valor real e N-1 (diferenca desprezivel). Filtro corrigido: DT_COMPETENCIA* -> ID_SEQ_FATOS*.
+A classificacao afetado/limpo NAO muda.
+
+AFETADOS pelo truncamento (6 anos): 1996, 2000, 2001, 2002, 2003, 2011.
+LIMPOS na amostra (16 anos): 1997, 1999, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+                             2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019.
+SEM DADOS: 1998 (CSV vazio).
+
+MUDANCA vs amostragem anterior (so inicio): 2002 e 2003 eram tidos como limpos/marginais e
+revelaram-se AFETADOS (3,29% e 11,49%). Lista de afetados subiu de 5 para 6.
+
+Cruzamento com o estado do ADW (V1_FATOS_CAGED_TRABS_AJUSTADO):
+  - Carregados E AFETADOS (PRECISAM RECARGA apos corrigir DARDO): 1996, 2002, 2003.
+  - Carregados e limpos na amostra: 1997, 1999, 2004, 2005, 2006.
+  - AFETADOS e ainda NAO carregados: 2000, 2001, 2011 (NAO carregar antes da correcao).
+
+Ressalva de metodo: amostragem nao cobre 100%. Para os "limpos" que ja estao no ADW (1997, 1999,
+2004, 2005, 2006), convem confirmar com modo Completo + foco 1 antes de descarta-los da recarga
+em definitivo - 2002/2003 mostraram que o inicio do arquivo enganava.
+
+PROXIMO PASSO: corrigir a conversao VARCHAR2->INT de NU_COMPET_MOV/NU_COMPET_DECLARADA no job
+DARDO (P_BGE_ETL_001_DW_MIGRACAO_DARDO, view QRY_DADOS), reprocessar a cadeia, regerar os CSVs
+dos anos afetados e recarregar via TASK_FATOS_CAGED_TRABS_AJUSTADO.
+
+### FERRAMENTA scripts/scan_menu.ps1 - varredura interativa dos CSVs - 2026-10-20
+
+Criado nesta sessao para substituir o antigo scan_full.ps1 (temporario, nao persistia).
+Menu interativo, roda no terminal do usuario (usa Read-Host). Le o token OCI do disco a cada
+chamada, entao a reautenticacao (oci session authenticate, perfil bgetrab-session) vale tanto
+para o terminal do usuario quanto para o assistente.
+
+Localizacao: C:\projetos\IA\bgetrab-agente\scripts\scan_menu.ps1
+Uso: powershell -ExecutionPolicy Bypass -File .\scripts\scan_menu.ps1
+
+Capacidades:
+  - Lista os anos dinamicamente do bucket-bgetrab-prod (prefixo FATOS_CAGED_TRABS_AJUSTADO_),
+    com tamanho em GB; marca 1998 como [VAZIO]. Escolha: um ano, ou T (todos), ou Q (sair).
+  - Modo: [A]mostragem (inicio 80 MB + meio 4 MB + fim 4 MB, ~1 min/ano) ou [C]ompleto
+    (streaming de blocos de 256 MB, le o arquivo inteiro, com progresso % e sem acumular disco;
+    trata a linha de fronteira entre blocos via carry).
+  - CRITERIOS com SELECAO MULTIPLA (separados por virgula) ou A para todos:
+      [1] DT_COMPETENCIA_MOVIMENTACAO (AAAAMM)  [2] Estrutura (50 campos)
+      [3] VL_SALARIO_MENSAL_DECLARADO vazio     [4] NU_IDADE_TRABALHADOR vazio
+      [5] NU_CPF mascarado                      [6] NU_PIS mascarado
+    Ex.: "1" | "1,4" | "3,5,6" | "A". So conta/exibe os criterios escolhidos (mais rapido).
+    A Estrutura (contagem de 50 campos) e sempre calculada internamente (os demais dependem dela),
+    mas so e exibida/gravada se [2] for escolhido.
+
+Saida em arquivo (VERSIONADA - contem so contagens agregadas, SEM PII):
+  - scripts/resultados/scan_resultados.csv  (colunas FIXAS, append; consolidacao previsivel)
+      cabecalho: timestamp;ano;modo;criterios;linhas;desalinhadas;dtcmov_fora;dtcmov_pct;
+                 sal_vazio;idade_vazio;cpf_masc;pis_masc;situacao;tempo_s
+      (colunas de criterios nao escolhidos ficam vazias naquela linha)
+  - scripts/resultados/scan_resultados.log  (bloco legivel, igual a tela, append)
+  Ambos UTF-8 sem BOM. O .gitignore recebeu excecoes (!scripts/resultados/...) para versionar
+  apenas esses dois arquivos, mantendo o bloqueio geral de *.csv/*.log (protege PII do CAGED).
+
+Classificacao automatica (coluna situacao): avalia SO os criterios escolhidos. AFETADO se
+estrutura/dtcmov/salario/idade tiverem problema; ATENCAO se CPF/PIS nao 100% mascarado; senao limpo.
+
+CORRECAO IMPORTANTE (mesma sessao): o filtro de descarte do cabecalho estava errado
+('DT_COMPETENCIA*'); a 1a coluna do header e ID_SEQ_FATOS_CAGED_TRAB_AJUS. Por isso o header
+escapava e somava 1 em DTCMOV fora de AAAAMM (e 1 em CPF/PIS nao-mascarado) nos anos LIMPOS.
+Corrigido para 'ID_SEQ_FATOS*'. A partir daqui, anos limpos mostram 0 (sem o 1 fantasma do header).
+A classificacao afetado/limpo ja registrada NAO muda (ver secao da varredura por amostragem).
+
+Armadilhas respeitadas (ja conhecidas do projeto): oci dentro de Start-Job com Wait-Job -Timeout;
+CA bundle propagado ao job (OCI_CLI_CA_BUNDLE/REQUESTS_CA_BUNDLE/SSL_CERT_FILE); arquivos gravados
+em UTF-8 sem BOM; nada de --query com aspas dentro do Start-Job.
+
+### PROPOSTA DE CORRECAO DO JOB DARDO (entregue p/ aplicacao manual no BODS) - 2026-10-20
+
+Status: PROPOSTA formalizada e entregue ao usuario para aplicacao MANUAL no BODS Designer.
+O assistente NAO altera o BODS. Esta secao e a referencia da correcao a aplicar.
+
+Problema: truncamento de DT_COMPETENCIA_MOVIMENTACAO (perde o 1o digito do ano, ex.: 199601 -> 99601).
+Causa raiz confirmada: conversao implicita VARCHAR2->INT no job DARDO (a origem textual esta integra).
+
+ONDE APLICAR:
+  - Job/arquivo : P_BGE_ETL_001_DW_MIGRACAO_DARDO.atl
+  - Data flow   : DF_BGE_ETL_001_MIGRA_DARDO_TRAB
+  - View (Query): QRY_DADOS (aprox. linha 12529 no .atl)
+  - Origem lida : DWCAGED.DWCAGED_SAPB.TP_CAGED_TRABALHADOR
+
+MAPEAMENTO ATUAL (errado - conversao implicita texto->inteiro trunca):
+  DT_COMPETENCIA              INT  <- TP_CAGED_TRABALHADOR.NU_COMPET_DECLARADA
+  DT_COMPETENCIA_MOVIMENTACAO INT  <- TP_CAGED_TRABALHADOR.NU_COMPET_MOV
+
+CORRECAO - DT_COMPETENCIA_MOVIMENTACAO (campo que falhou):
+  ifthenelse( is_valid_int(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_MOV)), '######') = 1,
+              to_decimal(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_MOV)), '.', '', 0),
+              0 )
+
+CORRECAO - DT_COMPETENCIA (aplicar por consistencia, mesmo sem ter falhado):
+  ifthenelse( is_valid_int(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_DECLARADA)), '######') = 1,
+              to_decimal(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_DECLARADA)), '.', '', 0),
+              0 )
+
+VERSAO MINIMA (sem validacao), se preferir:
+  to_decimal(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_MOV)), '.', '', 0)
+
+ALTERNATIVA (se a instalacao NAO tiver is_valid_int):
+  to_decimal( nvl(ltrim_blanks(rtrim_blanks(TP_CAGED_TRABALHADOR.NU_COMPET_MOV)), '0'), '.', '', 0)
+
+POR QUE RESOLVE:
+  - ltrim_blanks/rtrim_blanks tiram espacos/\r residuais do texto.
+  - to_decimal(..., '.', '', 0) converte '199601' no numero 199601 de forma explicita e completa,
+    sem a truncagem do INT implicito. Resultado continua NUMERICO (respeita a regra da empresa).
+  - is_valid_int + ifthenelse(...,0) protege contra valor nao-numerico (grava 0, padrao do job).
+
+PONTO CRITICO (conferir no Designer): o tipo/escala de DESTINO de DT_COMPETENCIA_MOVIMENTACAO (e
+DT_COMPETENCIA) na saida da QRY_DADOS e nas camadas seguintes DEVE comportar 6 digitos
+(ex.: decimal(6,0) ou maior, ou int de 32 bits). Se o destino for inteiro estreito (ex.: 5 posicoes),
+o 6o digito volta a cair ali, independentemente da expressao. to_decimal(...,0) gera decimal sem casas;
+o destino precisa aceitar 6 digitos inteiros. NAO precisa mudar o campo para varchar.
+
+PASSOS NO BODS:
+  1. Abrir P_BGE_ETL_001_DW_MIGRACAO_DARDO -> DF_BGE_ETL_001_MIGRA_DARDO_TRAB -> view QRY_DADOS.
+  2. Substituir o mapeamento direto de DT_COMPETENCIA_MOVIMENTACAO e DT_COMPETENCIA pelas expressoes acima.
+  3. Conferir/ajustar o tipo de saida dessas colunas (comportar 6 digitos).
+  4. Validate All (checar is_valid_int/to_decimal/ltrim_blanks; se faltar, usar a alternativa com nvl).
+  5. Reprocessar o job DARDO -> regenera TP_TRAB_AJUST / FATOS_CAGED_TRABS_AJUSTADO com 6 digitos.
+  6. Rodar P_BGE_ETL_001_MIGRA_CAGED_V1 -> CSVs ja corretos.
+  7. Re-subir ao bucket e recarregar via TASK_FATOS_CAGED_TRABS_AJUSTADO os anos AFETADOS:
+     1996, 2000, 2001, 2002, 2003, 2011 (ideal: blindar/regerar todos).
+
+VERIFICACAO POS-CORRECAO:
+  - CSV: 0 linhas com DT_COMPETENCIA_MOVIMENTACAO fora de ^\d{6}$ (mes 01-12) - usar scan_menu.ps1.
+  - ADW (SQL):
+      SELECT COUNT(*) AS fora_do_padrao
+      FROM   BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+      WHERE  NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO), '^[0-9]{4}(0[1-9]|1[0-2])$');
+      -- esperado: 0
+
+LEMBRETE: a correcao do _corrigido.atl (P_BGE_ETL_001_MIGRA_CAGED_V1) tratou salario/idade/
+desalinhamento/PII, mas NAO este truncamento. Este e no job DARDO (upstream), job diferente.
+
+### MELHORIA scan_menu.ps1 - refresh proativo da sessao por TEMPO - 2026-10-20
+
+Motivo: a sessao OCI expirava durante varreduras longas, interrompendo a analise.
+
+Implementado: refresh PROATIVO baseado em tempo (nao a cada bloco literalmente).
+  - Variavel $REFRESH_MIN = 5 (minutos; ajustavel no topo do script).
+  - Marcador $script:LastRefresh.
+  - Funcao Maybe-Refresh chamada ANTES de cada bloco (amostragem e completo): se passaram
+    >= REFRESH_MIN minutos desde o ultimo refresh, roda oci session refresh --profile bgetrab-session
+    (Start-Job, timeout 45s, CA bundle propagado) e reinicia o contador; senao, nao faz nada.
+  - Funcao Refresh-Session: retorna false se a saida tiver SSLError/expired/Abort/Error.
+  - Se o refresh falhar (token ja expirou de vez), o script AVISA para rodar oci session authenticate
+    e CONTINUA (nao aborta); nao re-tenta a cada bloco (espera o proximo intervalo).
+
+Por que funciona: o refresh e feito enquanto o token AINDA esta valido, renovando antes de expirar.
+E o oposto do que falhou nesta sessao (tentar refresh so depois de expirado, que nao funciona).
+
+Ressalva: cobre expiracao por tempo-de-vida curto/inatividade. Nao supera a JANELA MAXIMA absoluta
+do token de sessao OCI - se esta estourar numa varredura muito longa, so o oci session authenticate
+(novo login no navegador) resolve.
+
+### DESCOBERTA + SOLUCAO DE SESSAO (Opcao B) no scan_menu.ps1 - 2026-10-20
+
+DESCARTADA a abordagem de refresh por tempo (secao anterior): NAO funciona neste ambiente.
+
+Descobertas (confirmadas por diagnostico nesta sessao):
+  1. oci session refresh SEMPRE falha aqui com CERTIFICATE_VERIFY_FAILED. O endpoint
+     auth.sa-saopaulo-1.oraclecloud.com e interceptado (folha re-assinada marca Zscaler,
+     emissor/raiz = Kaspersky CA thumbprint 8481...). A raiz Kaspersky ESTA no bundle (144 certs)
+     e NAO falta intermediario (cadeia tem so 2 niveis: folha + raiz), mas o requests/Python do
+     refresh ainda nao valida. A folha muda de thumbprint a cada conexao (re-assinatura dinamica).
+     Conclusao: refresh e beco sem saida; nao insistir.
+  2. O token de sessao dura ~60 MINUTOS exatos (lido do claim exp do JWT: iat 16:35:49 -> exp
+     17:35:49). A leitura de Object Storage (oci os ...) continua funcionando normalmente com o
+     token valido - o problema e SO o endpoint de auth (refresh/authenticate).
+  Efeito: varredura por amostragem (rapida) cabe em 1h; varredura COMPLETA de anos de 7-10 GB
+  passa de 1h e estoura a janela -> sessao cai no meio.
+
+SOLUCAO ADOTADA (Opcao B - aviso proativo de expiracao):
+  - Removidos $REFRESH_MIN / Refresh-Session / Maybe-Refresh.
+  - $SESSION_MARGIN_MIN = 3 (minutos de margem).
+  - Get-TokenExpiry: le o security_token_file do perfil (via config) e decodifica o claim exp do
+    JWT (base64url) para saber quando expira. NAO expoe o token. Testada: leu exp corretamente.
+  - Ensure-SessionTime: chamada ANTES de cada bloco (amostragem e completo). Se faltar menos que
+    SESSION_MARGIN_MIN para expirar, PAUSA, instrui o usuario a rodar
+    "oci session authenticate --region sa-saopaulo-1" (perfil bgetrab-session) no outro terminal,
+    aguarda ENTER, rele o exp e so continua quando houver folga. Loop ate a sessao ter folga.
+  - Resultado: o script NUNCA perde a sessao (pausa antes), mantem os contadores na memoria (sem
+    checkpoint em disco, sem reprocessar blocos). Custo: uma pausa manual de login a cada ~1h.
+
+Observacao: como o token vale 60 min, uma varredura completa longa tera 1 pausa de login por hora.
+Para rodar varios anos grandes no modo Completo, esperar as pausas ou dividir por ano/sessao.

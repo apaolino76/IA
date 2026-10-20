@@ -48,3 +48,9 @@ monitor_run_*.ps1
 # Prints de consultas (podem exibir dados de tabelas - LGPD)
 imagens/
 *.png
+
+# ===== Excecoes: resultados da varredura (sem PII - so contagens agregadas) =====
+# Sobrepoe as regras genericas *.csv e *.log acima, apenas para estes arquivos.
+!scripts/resultados/
+!scripts/resultados/scan_resultados.csv
+!scripts/resultados/scan_resultados.log

@@ -1,0 +1,48 @@
+===== RESULTADO 2019 (Completo) - 2026-10-20 15:04:11 =====
+  linhas amostradas        : 3.274.477
+  desalinhadas (!=50)      : 55
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : AFETADO
+  tempo (s)                : 686,6
+================================
+===== RESULTADO 2018 (Completo) - 2026-10-20 15:11:06 =====
+  linhas amostradas        : 0
+  desalinhadas (!=50)      : 0
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : limpo
+  tempo (s)                : 46,6
+================================
+===== RESULTADO 2017 (Completo) - 2026-10-20 15:13:01 =====
+  linhas amostradas        : 0
+  desalinhadas (!=50)      : 0
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : limpo
+  tempo (s)                : 44,0
+================================
+===== RESULTADO 2016 (Completo) - 2026-10-20 15:14:24 =====
+  linhas amostradas        : 0
+  desalinhadas (!=50)      : 0
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : limpo
+  tempo (s)                : 45,7
+================================
+===== RESULTADO 2019 (Completo) [criterios: dtcmov,estrutura,pis] - 2026-10-20 16:31:32 =====
+  linhas amostradas        : 18.793.442
+  desalinhadas (!=50)      : 27
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  NU_PIS mascarado                  : 0 / 18.793.442
+  situacao                 : AFETADO
+  tempo (s)                : 3.411,2
+================================
+===== RESULTADO 2018 (Completo) [criterios: dtcmov] - 2026-10-20 16:33:29 =====
+  linhas amostradas        : 0
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : limpo
+  tempo (s)                : 45,8
+================================
+===== RESULTADO 2018 (Completo) [criterios: dtcmov] - 2026-10-20 16:34:52 =====
+  linhas amostradas        : 0
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  situacao                 : limpo
+  tempo (s)                : 45,2
+================================
