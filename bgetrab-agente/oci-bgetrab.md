@@ -2204,3 +2204,8 @@ Variavel $SESS_DEFAULT = Session-Angelo (padrao). $SESS_NAME passa a ser definid
 Teste de execucao: validada a parte critica (listener TCP na 443 abre como usuario comum);
 chamadas OCI (validar/listar/criar sessao bastion) ja testadas isoladamente. O script em si e
 interativo (Read-Host + tunel em 1o plano), entao roda no terminal do usuario.
+
+### DOCUMENTACAO DO APEX EM ARQUIVO SEPARADO - 2026-10-21
+A documentacao do APEX (workspaces, aplicacoes, procedimentos no banco BGETRAB_OAC) fica no
+arquivo apex-bgetrab.md (mesma pasta). Consultar/atualizar la o que for do APEX; aqui fica a
+infraestrutura OCI. Decisao do usuario: manter os dois arquivos separados.
