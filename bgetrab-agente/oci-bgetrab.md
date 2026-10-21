@@ -2332,3 +2332,67 @@ VERIFICACAO pos-execucao:
 
 LIMITE: a criacao da procedure/SQL Task/pipeline e feita pelo usuario no APEX/DI Designer
 (interface web). O assistente documenta o roteiro e os SQLs; nao opera essas telas.
+
+### PRC_APAGA_ANO_CAGED CRIADA no ADW DEV - 2026-10-21
+Confirmado por imagem (Object Browser do Database Actions): a procedure PRC_APAGA_ANO_CAGED foi
+criada no schema BGETRAB_OAC (DEV), com o codigo definido (validacao de p_ano, DELETE por
+DBMS_OUTPUT). COMPILACAO CONFIRMADA (imagem proc_apex_v2.png): "PL/SQL code successfully
+compiled (14:17:56)". Procedure valida e pronta. Tabela alvo V1_FATOS_CAGED_TRABS_AJUSTADO existe (DELETE compilou ok).
+
+Descoberta util: o projeto JA tem procedures analogas de limpeza para RAIS, visiveis na arvore:
+  PRC_DELETA_ANOS_RAIS, PRC_APAGA_DI_ANO_RAIS (alem de PRC_REFRESH_MVS_PAINEL,
+  PRC_REFRESH_MV_VISAO_GERAL, PRC_TRUNCATE_FT_RAIS_DECLARACOES_ANUARIO,
+  PRC_TRUNCATE_FT_RAIS_VINCULOS_ANUARIO). Vale comparar a convencao delas (filtro/commit) com a
+  nossa, se quiser alinhar 100% ao padrao do projeto.
+
+### ANALISE SQL_TASK_APAGA_ANO_CAGED - COMPATIVEL - 2026-10-21
+
+Verificada via data-integration task get (workspace DEV, task key e73edc72-e7ec-4337-af76-cd2e99ae472e).
+A task esta CORRETA e pronta para executar a procedure:
+  - Modo: operation referencia OBJETO PROCEDURE -> dataref:.../BGETRAB_OAC/PROCEDURE:PRC_APAGA_ANO_CAGED
+    (modelType PROCEDURE). NAO usa texto BEGIN...END - o DI chama a procedure como objeto (padrao do
+    projeto; a SQL Task "le procedures").
+  - Procedure alvo: BGETRAB_OAC.PRC_APAGA_ANO_CAGED (a criada/compilada).
+  - Parametro da task: name=P_ANO, type-name=VARCHAR, is-input=true (IN), is-output=false.
+    Compativel com o argumento p_ano VARCHAR2 da procedure (o DI mapeia P_ANO da task -> p_ano da proc).
+  - default-value vazio: ok e SEGURO. Se rodar sem informar P_ANO, a validacao da procedure
+    (^[0-9]{4}$) aborta com ORA-20001 (nao apaga nada). Sempre informar P_ANO na execucao/pipeline.
+
+Proximo passo: no PIPELINE, mapear P_ANO (pipeline) -> P_ANO (SQL Task) e PARAMETER_ARQ -> carga;
+SQL Task -> ON SUCCESS -> TASK_FATOS_CAGED_TRABS_AJUSTADO. Testar isolada em DEV com P_ANO=2007
+(apaga ~31 mi de 2007 - so se puder recarregar depois).
+
+Chaves: dataref do ADW = 7461b79a-4b91-44e0-96af-1d22130032fd ; task key = e73edc72-e7ec-4337-af76-cd2e99ae472e.
+
+### CASE SENSITIVE DOS PARAMETROS (P_ANO) - nota - 2026-10-21
+
+  - PL/SQL (procedure): identificador sem aspas (p_ano) e CASE-INSENSITIVE; Oracle guarda como
+    P_ANO no dicionario. Nao ha problema de case dentro da procedure.
+  - OCI Data Integration: o nome do parametro e CASE-SENSITIVE no mapeamento por nome. A SQL Task
+    ja tem o parametro P_ANO (maiusculo); o parametro do PIPELINE e o mapeamento DEVEM usar P_ANO
+    identico (nao p_ano/Ano), senao da "parameter not found".
+  - Modo objeto-PROCEDURE (caso atual): DI casa P_ANO da task <-> P_ANO (arg da proc). Ja alinhado.
+  - Valor (nao o nome): sem questao de case; respeitar o formato ^[0-9]{4}$ (ex.: 2007; sem espaco/aspas).
+
+REGRA DE OURO: padronizar P_ANO em MAIUSCULAS e identico em TODAS as camadas (pipeline, SQL Task,
+mapeamentos). A procedure (p_ano minusculo no codigo) e indiferente.
+
+### AVALIACAO DO PIPELINE_RECARGA_CAGED_ANO - CORRETO - 2026-10-21
+
+Pipeline key 6de37528-137f-496c-927e-890ac49cac54 (workspace DEV, Project_BGETRAB/DWCAGED).
+Verificado via pipeline get + print do canvas (print_pipeline.png).
+
+Topologia (confirmada no canvas): START -> SQL_TASK_APAGA_ANO_CAGED -> TASK_FATOS_CAGED_TRABS_AJUSTADO -> END
+  - Ordem CORRETA: apaga (SQL Task/procedure) ANTES de carregar (Integration Task).
+  - Dependencia ON SUCCESS entre os nos (marcadores de sucesso nas conexoes) - a carga so roda se
+    o delete concluir ok.
+
+Nos: SQL_TASK_APAGA_ANO_CAGED (SQL_TASK) e TASK_FATOS_CAGED_TRABS_AJUSTADO (INTEGRATION_TASK) - corretos.
+Parametros do pipeline: P_ANO (VARCHAR, default 2007) e PARAMETER_ARQ (data entity). Case consistente
+(P_ANO maiusculo em todas as camadas). Ha binding de P_ANO em config-provider-delegate/bindings.
+
+PENDENTE confirmar (so nos nos, nao no canvas): que o mapeamento P_ANO(pipeline)->P_ANO(SQL Task) e
+PARAMETER_ARQ(pipeline)->PARAMETER_ARQ(carga) estao corretos (clicar em cada no > parametros).
+
+STATUS: pipeline pronto. Proximo: validar o mapeamento nos nos, publicar na APL_BGETRAB_2 e testar em
+DEV com P_ANO=2007 (apaga ~31 mi e recarrega - so se puder). Em PROD, usar nos anos afetados apos o DARDO.
