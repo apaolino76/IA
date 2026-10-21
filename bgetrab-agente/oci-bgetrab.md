@@ -2209,3 +2209,79 @@ interativo (Read-Host + tunel em 1o plano), entao roda no terminal do usuario.
 A documentacao do APEX (workspaces, aplicacoes, procedimentos no banco BGETRAB_OAC) fica no
 arquivo apex-bgetrab.md (mesma pasta). Consultar/atualizar la o que for do APEX; aqui fica a
 infraestrutura OCI. Decisao do usuario: manter os dois arquivos separados.
+
+### DIAGNOSTICO DO FATO CAGED EM DEV + VALIDACAO DO FILTRO DE LIMPEZA - 2026-10-21
+
+Ambiente: DESENVOLVIMENTO (ADW, schema BGETRAB_OAC). Dados diferentes de PROD. Consultas via
+SQL Commands do APEX (acesso por tunel de bastion).
+
+Diag 1 (total e truncadas por ano em V1_FATOS_CAGED_TRABS_AJUSTADO):
+  | ano  | total      | truncadas |
+  |------|------------|-----------|
+  | 2007 | 31.096.029 | 0 |
+  | 2008 | 36.204.214 | 0 |
+  | 2019 | 35.330.837 | 0 |
+  -> Em DEV so ha 2007, 2008, 2019 carregados; 0 truncadas (DT_COMPETENCIA_MOVIMENTACAO 100% AAAAMM).
+     Coerente com PROD (esses anos estavam limpos na varredura). O filtro SUBSTR(DT_COMPETENCIA,1,4)
+     agrupou certo por ano -> coluna em AAAAMM, filtro valido.
+
+Diag 2 (dispersao ano_competencia x ano_movimentacao):
+  2007 comp -> mov 2006 (340.566), 2007 (28.439.242), 2008 (2.316.221)
+  2008 comp -> mov 2007 (466.603), 2008 (35.737.611)
+  2019 comp -> mov 2018 (240.530), 2019 (35.090.307)
+  -> Ha movimentacao retroativa/adiantada (esperado no CAGED): uma competencia contem movimentacoes
+     de anos vizinhos. CONFIRMA que o filtro de limpeza DEVE ser por DT_COMPETENCIA (como o CSV/arquivo
+     e organizado), NAO por DT_COMPETENCIA_MOVIMENTACAO (que, alem de truncado, espalha por 3 anos).
+
+CONCLUSAO: a procedure de limpeza (PRC_APAGA_ANO_CAGED) deve filtrar por
+SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4) = p_ano. Validado. Pode ser testada em DEV (2007/2008/2019).
+
+### PROCEDURE PRC_APAGA_ANO_CAGED (limpeza pre-carga, chamada pela SQL Task) - 2026-10-21
+
+Contexto: no DI deste ambiente, a SQL Task executa PROCEDURE (nao DELETE avulso). Entao a limpeza
+pre-carga do pipeline e feita por esta procedure, chamada pela SQL Task antes do no de carga.
+Filtro por DT_COMPETENCIA validado pelos diagnosticos (movimentacao espalha por anos vizinhos;
+competencia e a organizacao do arquivo/carga). COMMIT DENTRO da procedure (decisao do usuario).
+
+Procedure (criar no schema BGETRAB_OAC):
+```sql
+CREATE OR REPLACE PROCEDURE BGETRAB_OAC.PRC_APAGA_ANO_CAGED (
+    p_ano IN VARCHAR2
+) AS
+    v_linhas NUMBER;
+BEGIN
+    -- Sanidade: p_ano deve ser AAAA (4 digitos). Evita DELETE indevido por parametro vazio/errado.
+    IF p_ano IS NULL OR NOT REGEXP_LIKE(p_ano, '^[0-9]{4}$') THEN
+        RAISE_APPLICATION_ERROR(-20001,
+            'PRC_APAGA_ANO_CAGED: p_ano invalido ('''|| NVL(p_ano,'NULL') ||'''). Esperado AAAA (4 digitos).');
+    END IF;
+
+    DELETE FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+    WHERE  SUBSTR(TO_CHAR(DT_COMPETENCIA), 1, 4) = p_ano;
+
+    v_linhas := SQL%ROWCOUNT;
+    COMMIT;
+
+    DBMS_OUTPUT.PUT_LINE('PRC_APAGA_ANO_CAGED: ano=' || p_ano || ' linhas apagadas=' || v_linhas);
+END PRC_APAGA_ANO_CAGED;
+/
+```
+
+Chamada pela SQL Task (bloco PL/SQL anonimo):
+```sql
+BEGIN
+    BGETRAB_OAC.PRC_APAGA_ANO_CAGED(:P_ANO);
+END;
+```
+
+No pipeline: SQL Task (chama a procedure, parametro P_ANO) -> ON SUCCESS -> Integration Task
+(TASK_FATOS_CAGED_TRABS_AJUSTADO, com PARAMETER_ARQ do ano). Idempotente: ano sem dados -> apaga 0.
+
+Plano de teste (DEV, anos disponiveis 2007/2008/2019):
+  1. Criar a procedure.
+  2. Conferir o alvo: SELECT COUNT(*) ... WHERE SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4)='2007';  (~31.096.029)
+  3. (Opcional, destrutivo) EXEC: BEGIN BGETRAB_OAC.PRC_APAGA_ANO_CAGED('2007'); END; / - so se puder
+     recarregar 2007 em DEV depois. Para apenas validar compilacao, nao executar.
+
+Nota: a procedure serve DEV e PROD (mesmo schema/tabela). Em PROD, usar nos anos afetados pelo
+truncamento (1996,2000,2001,2002,2003,2011) dentro do pipeline, antes da recarga corrigida.
