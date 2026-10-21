@@ -250,6 +250,38 @@ e copiar o SQL do atributo Source; ou SELECT region_source sem SUBSTR (pode exce
 coluna no export - preferir copiar direto do Designer).
 
 
+## Apps RAIS (101 e 103) - dependencias de dados
+
+Coletado em 2026-10-21 (region_source das regioes SQL Query, apps 101 e 103). 34 regioes com SQL.
+As apps RAIS usam objetos RAIS - NENHUMA referencia a V1_* (CAGED). Confirma separacao total do
+CAGED: o truncamento de DT_COMPETENCIA_MOVIMENTACAO NAO afeta o painel RAIS (so a app 104).
+
+Objetos usados (FROM/JOIN):
+  Fatos RAIS:
+    - FT_RAIS_DECLARACOES_ANUARIO (estabelecimentos/declaracoes)
+    - FT_RAIS_VINCULOS_ANUARIO (vinculos)
+    - TAB_RAIS_VINCULOS_ANALITICA (analitica de vinculos)
+    - FT_INDICE_GINI + TP_FT_INDICE_GINI_SEXO (indice de Gini)
+  Dimensoes (DI_*/DW_*):
+    - DI_CNAE_80, DI_FLAGS_RAIS_ESTAB, DI_FLAGS_RAIS_ESTAB_DECLARACAO, DI_NATUREZA_JURIDICA,
+      DI_REGIAO_GEOGRAFICA, DI_TAMANHO_EMPRESAS_MTE, DI_TIPOS_ESTAB_MTE, DW_CNAE_2_0
+  Materialized views (paginas "- MV" 106/107):
+    - MV_VISAO_GERAL, MV_REMUNERACOES
+  Outros: GINI_BRASIL, salarios (view/alias), DUAL, PARAM (ruido de parsing/aliases).
+
+Mapa por regiao (resumo):
+  - pg2 Painel Estabelecimentos -> FT_RAIS_DECLARACOES_ANUARIO + varias DI_*/DW_CNAE_2_0
+  - pg5 Painel Vinculos -> TAB_RAIS_VINCULOS_ANALITICA
+  - pg6 (101) / dashboards -> FT_RAIS_DECLARACOES_ANUARIO, FT_RAIS_VINCULOS_ANUARIO, DI_REGIAO_GEOGRAFICA
+  - pg7 remuneracoes -> TAB_RAIS_VINCULOS_ANALITICA, FT_RAIS_VINCULOS_ANUARIO, salarios
+  - pg8 Indice de Gini -> FT_INDICE_GINI, TP_FT_INDICE_GINI_SEXO, GINI_BRASIL
+  - pg106 "Visao Geral - MV" -> MV_VISAO_GERAL (+ FT_RAIS_VINCULOS_ANUARIO)
+  - pg107 "Remuneracoes - MV" -> MV_REMUNERACOES (+ FT_RAIS_VINCULOS_ANUARIO)
+
+101 vs 103: dependencias de dados praticamente identicas; 101 tem apenas regioes a mais
+(paginas de teste e chat, sem SQL de dados relevante). 103 = versao enxuta/oficial da 101.
+
+
 ## Procedimentos / notas
 
 (A preencher conforme o uso: SQLs uteis, processos, objetos de banco por app, correcoes.)
