@@ -2285,3 +2285,50 @@ Plano de teste (DEV, anos disponiveis 2007/2008/2019):
 
 Nota: a procedure serve DEV e PROD (mesmo schema/tabela). Em PROD, usar nos anos afetados pelo
 truncamento (1996,2000,2001,2002,2003,2011) dentro do pipeline, antes da recarga corrigida.
+
+### ROTEIRO - SQL Task + Pipeline de recarga no Data Integration - 2026-10-21
+
+Objetivo: pipeline que, por ano, APAGA (procedure) e depois CARREGA (task) o fato CAGED, evitando
+a duplicacao do MERGE. Montar no Workspace_BGETRAB_DEV e publicar na APL_BGETRAB_2.
+Pre-requisito: procedure BGETRAB_OAC.PRC_APAGA_ANO_CAGED ja criada no ADW (ver secao da procedure).
+
+PASSO A - criar a procedure (no APEX SQL Commands / Database Actions, schema BGETRAB_OAC):
+  - Colar e executar o CREATE OR REPLACE PROCEDURE PRC_APAGA_ANO_CAGED (ver secao dedicada).
+  - Conferir que compilou sem erros (SELECT * FROM user_errors WHERE name='PRC_APAGA_ANO_CAGED';).
+
+PASSO B - criar a SQL Task no DI (Workspace_BGETRAB_DEV):
+  1. Project/Folder do projeto > New Task > SQL Task. Nome sugerido: SQLTASK_APAGA_ANO_CAGED.
+  2. Connection/Data asset: DA_ADW_BGETRAB_PROD (ADW) ; schema default BGETRAB_OAC.
+  3. SQL (bloco PL/SQL anonimo que chama a procedure):
+       BEGIN BGETRAB_OAC.PRC_APAGA_ANO_CAGED(:P_ANO); END;
+  4. Declarar o parametro P_ANO (string/varchar). Valor default opcional para teste (ex.: 2007).
+  5. Validar e salvar.
+
+PASSO C - criar o Pipeline no DI:
+  1. New > Pipeline. Nome sugerido: PIPELINE_RECARGA_CAGED_ANO.
+  2. Arrastar os operadores na ordem: [Start] -> (SQL Task SQLTASK_APAGA_ANO_CAGED) ->
+     (Integration Task TASK_FATOS_CAGED_TRABS_AJUSTADO) -> [End].
+  3. Conectar SQL Task -> Integration Task com dependencia de SUCESSO (a carga so roda se o
+     delete terminar OK).
+  4. Parametros do pipeline:
+     - P_ANO  -> mapeado para o P_ANO da SQL Task.
+     - PARAMETER_ARQ -> mapeado para o PARAMETER_ARQ da carga (CSV do ano,
+       ex.: FATOS_CAGED_TRABS_AJUSTADO_<ANO>.csv). Pode-se derivar de P_ANO via expressao ou
+       declarar os dois parametros e informar no run.
+     - (manter PARAM_ANO da carga conforme as runs historicas, se aplicavel.)
+  5. Validar e salvar.
+
+PASSO D - publicar e executar:
+  1. Publicar o pipeline (e a SQL Task) na application APL_BGETRAB_2.
+  2. Executar por ano, informando P_ANO e PARAMETER_ARQ. Teste primeiro em DEV (2007/2008/2019).
+  3. Em PROD, rodar para os anos afetados pelo truncamento (1996,2000,2001,2002,2003,2011) APOS
+     o job DARDO regerar os CSVs corrigidos.
+
+VERIFICACAO pos-execucao:
+  - Log da SQL Task: "PRC_APAGA_ANO_CAGED: ano=XXXX linhas apagadas=N".
+  - Run da carga: SUCCESS, records-written > 0.
+  - ADW: SELECT COUNT(*) ... WHERE NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO),
+    '^[0-9]{4}(0[1-9]|1[0-2])$'); -> 0 ; e contagem por ano == records-written (sem duplicatas).
+
+LIMITE: a criacao da procedure/SQL Task/pipeline e feita pelo usuario no APEX/DI Designer
+(interface web). O assistente documenta o roteiro e os SQLs; nao opera essas telas.
