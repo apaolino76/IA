@@ -2396,3 +2396,101 @@ PARAMETER_ARQ(pipeline)->PARAMETER_ARQ(carga) estao corretos (clicar em cada no 
 
 STATUS: pipeline pronto. Proximo: validar o mapeamento nos nos, publicar na APL_BGETRAB_2 e testar em
 DEV com P_ANO=2007 (apaga ~31 mi e recarrega - so se puder). Em PROD, usar nos anos afetados apos o DARDO.
+
+### ANALISE CSV 1996 POS-CORRECAO DO DARDO - CORRECAO PARCIAL - 2026-10-21
+
+CSV FATOS_CAGED_TRABS_AJUSTADO_1996.csv regenerado apos a correcao do DARDO.
+  version-id b17355cc-c70c-4e12-933d-b7c5aac275ab | last-modified 2026-10-21 13:15 UTC | ~4,31 GB.
+
+Varredura (inicio 80MB + meio + fim, ~408 mil linhas):
+  | criterio                               | resultado        |
+  |----------------------------------------|------------------|
+  | estrutura (50 campos)                  | 0 desalinhadas OK|
+  | VL_SALARIO_MENSAL_DECLARADO vazio      | 0 OK             |
+  | NU_IDADE_TRABALHADOR vazio             | 0 OK             |
+  | CPF / PIS mascarados                   | 100% OK          |
+  | DT_COMPETENCIA_MOVIMENTACAO fora AAAAMM | 86.987 (21,31%) AINDA COM PROBLEMA |
+
+PARECER: a correcao do DARDO foi PARCIAL. O truncamento caiu de ~55% (antes) para ~21% (agora),
+mas NAO zerou. Amostra dos ~20MB iniciais: 33.612 defeituosas, distribuicao len=4 (21.348) e
+len=5 (12.264). Exemplos: DT_COMPETENCIA=199610 (ok) com DT_COMPETENCIA_MOVIMENTACAO=99601
+(deveria 199601) - MESMO truncamento de digito significativo de antes. Nao e valor legitimo/nulo.
+
+HIPOTESE (causa do residual): a correcao pegou UM caminho da conversao VARCHAR2->INT, mas o
+NU_COMPET_MOV ainda passa por OUTRA conversao truncante em outro ramo/camada. O fato ajustado tem
+2 ramos (movimentacoes normais + acertos) que convergem no Merge; provavel que so um ramo foi
+corrigido. Ou ha coluna/staging intermediaria (TP_*) declarada como INT/NUMBER(<6) que re-trunca
+o to_decimal da expressao corrigida.
+
+PROXIMO PASSO (BODS, job DARDO): revisar TODOS os pontos de conversao/mapeamento de NU_COMPET_MOV
+(e NU_COMPET_DECLARADA) em TODAS as camadas e nos DOIS ramos (inclusive acertos) ate a gravacao;
+garantir destino com 6 digitos (NUMBER(6)+). Conferir tipo/precisao das colunas intermediarias.
+Sugestao de diagnostico fino: verificar se as ~21% truncadas correspondem a um ramo/tipo especifico
+(ex.: ID_TIPO_MOVIMENTACAO de acerto) para apontar o ramo exato.
+
+### CAUSA RAIZ REAL DO TRUNCAMENTO (DARDO) - reordenacao por substr - 2026-10-21
+
+Correcao de entendimento (usuario): sao 2 jobs distintos.
+  - P_BGE_ETL_001_MIGRA_CAGED_V1.atl: LE as tabelas Oracle FATOS_CAGED_TRABS_AJUSTADO (+ FATOS_CAGED_ACERTOS
+    quando $_PG_FATO_AJUST=1; so a 1a quando =0) e GERA o CSV do bucket.
+  - P_BGE_ETL_001_DW_MIGRACAO_DARDO.atl: LE o arquivo do DARDO e GRAVA na tabela FATOS_CAGED_TRABS_AJUSTADO.
+  (ou seja, o truncamento nasce no DARDO, que popula a tabela; o MIGRA_CAGED_V1 so le a tabela ja gravada.)
+
+MAPA de NU_COMPET_MOV / DT_COMPETENCIA_MOVIMENTACAO no DARDO (grep):
+  - L4737 QRY_... : NU_COMPET_MOV = ARQ_DARDO_TRAB.NU_COMPET_MOV (leitura crua VARCHAR) OK
+  - L4841         : ltrim_blanks/rtrim_blanks (limpa espacos) OK
+  - L4948         : replace_substr remove chr(123)/chr(125)/'/' OK
+  - L3220 e L5199 QRY_RETIRA_CHAVES: *** PONTO DO BUG ***
+        NU_COMPET_MOV = ifthenelse( match_regex(...'^ñ...')=1, null,
+                                    substr(NU_COMPET_MOV,3,4) || substr(NU_COMPET_MOV,1,2) )
+  - L12416 QRY_DADOS: DT_COMPETENCIA_MOVIMENTACAO DECIMAL(6,0) = ifthenelse(is_valid_int(...),
+        to_decimal(...NU_COMPET_MOV...,0), 0)  <- correcao ja aplicada (CORRETA, mas recebe valor ja corrompido)
+  - L12487/L12618: passthrough de DT_COMPETENCIA_MOVIMENTACAO (QRY_DADOS/QRY_BUSCA_ID) OK
+  - L321/L500/L548/L568: coluna/PK/indice (estrutura) - DT_COMPETENCIA_MOVIMENTACAO INT na staging TP (ver nota).
+
+CAUSA RAIZ: a expressao substr(NU_COMPET_MOV,3,4)||substr(NU_COMPET_MOV,1,2) REORDENA o valor
+assumindo origem MMAAAA de EXATAMENTE 6 caracteres (mes+ano -> ano+mes). Quando a origem vem com
+<6 chars (ex.: mes sem zero a esquerda, "11996") ou noutro formato, a reordenacao produz valor
+truncado de 4-5 digitos (bate com a varredura: len=4 e len=5; ex.: 99601). O to_decimal posterior
+so grava o que essa expressao produziu - nao recupera.
+ESTE e o ponto que resta corrigir (nao a conversao INT, que ja foi tratada).
+
+PENDENTE confirmar o FORMATO de origem de NU_COMPET_MOV para fechar a expressao:
+  - Se origem = MMAAAA (6 chars): corrigir para normalizar tamanho antes de reordenar
+    (ex.: lpad para 6 com zero a esquerda no mes) OU montar AAAAMM de forma robusta.
+  - ATENCAO: ha evidencia anterior (SQL do usuario) de que TP_CAGED_TRABALHADOR.NU_COMPET_MOV = '199601'
+    (AAAAMM, 6 digitos). Se JA e AAAAMM, a reordenacao substr(3,4)||substr(1,2) esta ERRADA por
+    definicao (nao deveria reordenar) - bastaria passar o valor direto. CONFIRMAR a origem real
+    (TP_CAGED_TRABALHADOR vs ARQ_DARDO_TRAB) antes de decidir a expressao final.
+
+### PENDENCIAS ABERTAS (resumo para retomar) - 2026-10-21 15:30
+
+1. TRUNCAMENTO DT_COMPETENCIA_MOVIMENTACAO - correcao PARCIAL (CSV 1996 pos-DARDO = 21% ainda fora de AAAAMM).
+   FALTA: corrigir a expressao de NU_COMPET_MOV na view QRY_RETIRA_CHAVES do job
+   P_BGE_ETL_001_DW_MIGRACAO_DARDO.atl (linhas ~3220 e ~5199):
+       substr(NU_COMPET_MOV,3,4) || substr(NU_COMPET_MOV,1,2)
+   Essa reordenacao (assume MMAAAA de 6 chars) trunca quando o valor vem com <6 chars (mes sem zero
+   a esquerda), gerando 99601/9601 (len 5/4). O to_decimal da QRY_DADOS (ja corrigido) nao recupera.
+
+   BLOQUEIO/DECISAO PENDENTE: confirmar o FORMATO REAL de NU_COMPET_MOV na origem do DARDO
+   (ARQ_DARDO_TRAB):
+     - Se MMAAAA (mes+ano): blindar tamanho antes de reordenar (lpad para 6 com zero a esquerda).
+     - Se AAAAMM (ano+mes): a reordenacao e INDEVIDA -> passar o valor direto (sem substr).
+   Nota: SQL anterior mostrou TP_CAGED_TRABALHADOR.NU_COMPET_MOV = '199601' (AAAAMM). Se ARQ_DARDO_TRAB
+   tambem for AAAAMM, a reordenacao esta errada por definicao. CONFIRMAR antes de alterar.
+
+2. RECARGA (mecanismo PRONTO, aguarda CSVs corrigidos):
+   - Procedure PRC_APAGA_ANO_CAGED (compilada), SQL_TASK_APAGA_ANO_CAGED (ok), PIPELINE_RECARGA_CAGED_ANO
+     (topologia ok: SQL->carga on-success). FALTA: conferir mapeamento de parametros nos nos,
+     publicar na APL_BGETRAB_2 e testar (DEV 2007/2008/2019; PROD anos afetados).
+   - Anos afetados por amostragem (PROD): 1996, 2000, 2001, 2002, 2003, 2011. Recarregar APOS os CSVs
+     ficarem 100% corretos (truncamento zerado).
+   - Lembrete: a task usa MERGE com DT_COMPETENCIA_MOVIMENTACAO na chave -> recarregar sem limpar
+     duplica; por isso o pipeline apaga (procedure) antes.
+
+3. SESSAO BASTION ativa (2026-10-21 ~15:07): Session-APEX
+   session-id ocid1.bastionsession.oc1.sa-saopaulo-1.amaaaaaa2n4fqhiagiingscu3guqi7vqiy3lb36qd6ptxqc3slsuhmp7vgfq
+   (TTL 3h). SSH command no padrao: ssh -i "<.key>" -v -N -L 443:10.217.48.81:443 -p 22 <session-id>@host.bastion...
+
+4. Outras pendencias de fundo (nao bloqueantes): NU_CEP em claro (LGPD, decisao de negocio);
+   1998 CSV vazio na origem; demais anos a reprocessar apos a correcao definitiva.
