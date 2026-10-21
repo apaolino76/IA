@@ -46,3 +46,11 @@
   situacao                 : limpo
   tempo (s)                : 45,2
 ================================
+===== RESULTADO 2018 (Completo) [criterios: dtcmov,estrutura,pis] - 2026-10-20 17:37:08 =====
+  linhas amostradas        : 24.634.011
+  desalinhadas (!=50)      : 15
+  DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM : 0  (0,00%)
+  NU_PIS mascarado                  : 0 / 24.634.011
+  situacao                 : AFETADO
+  tempo (s)                : 3.368,7
+================================

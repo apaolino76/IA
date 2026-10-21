@@ -1936,3 +1936,271 @@ SOLUCAO ADOTADA (Opcao B - aviso proativo de expiracao):
 
 Observacao: como o token vale 60 min, uma varredura completa longa tera 1 pausa de login por hora.
 Para rodar varios anos grandes no modo Completo, esperar as pausas ou dividir por ano/sessao.
+
+### CORRECAO DO JOB DARDO APLICADA - EM EXECUCAO - 2026-10-20 17:02
+
+A correcao da conversao VARCHAR2->INT (NU_COMPET_MOV / NU_COMPET_DECLARADA) no job DARDO
+(P_BGE_ETL_001_DW_MIGRACAO_DARDO, DF_BGE_ETL_001_MIGRA_DARDO_TRAB, view QRY_DADOS) foi
+APLICADA MANUALMENTE pelo usuario no BODS e o job esta EM EXECUCAO.
+
+Lembrete da cadeia (o DARDO e upstream):
+  TP_CAGED_TRABALHADOR (origem, texto integro)  ->  [job DARDO corrigido]  ->  TP_TRAB_AJUST /
+  FATOS_CAGED_TRABS_AJUSTADO  ->  [job P_BGE_ETL_001_MIGRA_CAGED_V1]  ->  CSVs no bucket  ->
+  [TASK_FATOS_CAGED_TRABS_AJUSTADO]  ->  ADW V1_FATOS_CAGED_TRABS_AJUSTADO.
+
+PROXIMOS PASSOS (apos o DARDO concluir):
+  1. Conferir que o job DARDO terminou com sucesso (regenera TP_TRAB_AJUST com 6 digitos).
+  2. Rodar P_BGE_ETL_001_MIGRA_CAGED_V1 para regerar os CSVs dos anos afetados
+     (1996, 2000, 2001, 2002, 2003, 2011; ideal: todos, pois a vulnerabilidade era geral).
+  3. Subir os CSVs regerados ao bucket-bgetrab-prod.
+  4. Verificar aderencia com scripts/scan_menu.ps1 (criterio 1 = DT_COMPETENCIA_MOVIMENTACAO):
+     esperado 0 linhas fora de AAAAMM.
+  5. Recarregar os anos afetados via TASK_FATOS_CAGED_TRABS_AJUSTADO (esperado SUCCESS, records>0).
+  6. Validar no ADW: SELECT COUNT(*) ... WHERE NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO),
+     '^[0-9]{4}(0[1-9]|1[0-2])$'); -- esperado 0.
+
+OBS: anos ja carregados e afetados (1996, 2002, 2003) serao SOBRESCRITOS na recarga; 2000, 2001,
+2011 ainda nao estavam carregados. Confirmar a estrategia de recarga (truncate/merge) da task.
+
+### ESTRATEGIA DE CARGA DA TASK = MERGE (risco de DUPLICACAO na recarga) - 2026-10-20
+
+Investigado via application get-published-object (task 2a76bf00...). A escrita no target do ADW
+(V1_FATOS_CAGED_TRABS_AJUSTADO, schema BGETRAB_OAC) usa:
+  write-mode = MERGE  (ORACLE_ADWC_WRITE_ATTRIBUTE)
+  merge-key  = 3 campos: ID_SEQ_FATOS_CAGED_TRAB_AJUS, DT_COMPETENCIA, DT_COMPETENCIA_MOVIMENTACAO
+
+IMPLICACAO CRITICA para a recarga dos anos JA carregados (1996, 2002, 2003):
+  - DT_COMPETENCIA_MOVIMENTACAO faz parte da MERGE-KEY e estava TRUNCADA nas linhas ja no ADW
+    (ex.: 99601 em vez de 199601).
+  - As linhas novas (corrigidas pelo job DARDO) virao com o valor CORRETO (199601).
+  - Logo a chave NAO bate: o MERGE nao encontra a linha existente -> em vez de UPDATE, faz INSERT.
+  - Resultado: DUPLICACAO. Fica a linha velha (truncada) + a nova (correta) para 1996/2002/2003.
+  Simplesmente reexecutar a task NAO substitui; duplica.
+
+Anos ainda NAO carregados (2000, 2001, 2011): sem linha antiga -> MERGE insere normal, sem problema.
+
+ACAO NECESSARIA antes/junto da recarga de 1996, 2002, 2003 (SQL no ADW - fora do OCI CLI, DESTRUTIVO,
+exige confirmacao e cuidado):
+  Opcao 1 (preferida): APAGAR as linhas antigas do ano ANTES de recarregar, filtrando por
+    DT_COMPETENCIA (nao corrompido). Ex. 1996: DELETE ... WHERE DT_COMPETENCIA BETWEEN 199601 AND 199612.
+    (confirmar faixa/semantica de DT_COMPETENCIA com a equipe antes de executar).
+  Opcao 2: recarregar (MERGE insere as corretas) e DEPOIS apagar as truncadas:
+    DELETE ... WHERE NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO), '^[0-9]{4}(0[1-9]|1[0-2])$');
+    (risco: durante a janela entre carga e limpeza ha duplicatas no fato).
+
+NOTA DE MODELAGEM (observacao, nao acao): ter DT_COMPETENCIA_MOVIMENTACAO na merge-key junto com
+ID_SEQ_FATOS_CAGED_TRAB_AJUS (aparente ID unico por linha) parece redundante. Se o ID ja for unico,
+a merge-key poderia ser so ele - e o truncamento nao quebraria o match. Decisao de modelagem da equipe.
+
+Chaves de referencia: data flow (parent) b18f9c66-5751-4c0b-9ce5-2102f60095b7;
+target entity c0c5813f-2859-4356-9b93-9a36b9aa3550/BGETRAB_OAC/TABLE_ENTITY:V1_FATOS_CAGED_TRABS_AJUSTADO.
+
+### PLANO E SQL DE LIMPEZA PRE-RECARGA (1996, 2002, 2003) - preparado 2026-10-20
+
+Contexto: a task usa MERGE com DT_COMPETENCIA_MOVIMENTACAO na merge-key (ver secao anterior).
+Recarregar os anos ja carregados SEM limpar duplicaria (linha truncada antiga + linha corrigida nova).
+Por isso, para 1996, 2002, 2003 e preciso LIMPAR as linhas antigas no ADW antes de recarregar.
+Anos 2000, 2001, 2011 NAO precisam de limpeza (nunca foram carregados).
+
+Tabela: BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO (ADW producao). SQL via SQL Developer Web/
+Database Actions (NAO e OCI CLI). Operacao DESTRUTIVA: SEMPRE contar antes de apagar e usar transacao.
+
+--- PASSO 0: diagnostico (quantas linhas por ano e quantas truncadas) ---
+  -- total por ano carregado e quantas com DT_COMPETENCIA_MOVIMENTACAO truncada:
+  SELECT SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4) AS ano,
+         COUNT(*) AS total,
+         SUM(CASE WHEN NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO),'^[0-9]{4}(0[1-9]|1[0-2])$')
+                  THEN 1 ELSE 0 END) AS truncadas
+  FROM   BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+  WHERE  SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4) IN ('1996','2002','2003')
+  GROUP  BY SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4)
+  ORDER  BY ano;
+
+--- ESTRATEGIA 1 (PREFERIDA): apagar o ano ANTES de recarregar, filtrando por DT_COMPETENCIA ---
+  -- confirmar a faixa com a equipe. DT_COMPETENCIA e AAAAMM (ano+mes). Para o ano AAAA:
+  -- CONTAR primeiro:
+  SELECT COUNT(*) FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+  WHERE  DT_COMPETENCIA BETWEEN 199601 AND 199612;   -- trocar por 2002xx / 2003xx conforme o ano
+  -- se o numero bater com o esperado, APAGAR (em transacao):
+  DELETE FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+  WHERE  DT_COMPETENCIA BETWEEN 199601 AND 199612;
+  COMMIT;  -- so apos conferir o rowcount
+  -- repetir para 2002 (200201..200212) e 2003 (200301..200312).
+  -- RESSALVA: se houver movimentacao com DT_COMPETENCIA fora do proprio ano (retroativa que
+  --           atravesse o ano-calendario), ajustar o filtro. Validar no PASSO 0.
+
+--- ESTRATEGIA 2 (alternativa): recarregar e depois apagar as truncadas ---
+  -- apos a task recarregar (MERGE insere as corrigidas), remover as linhas truncadas remanescentes:
+  SELECT COUNT(*) FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+  WHERE  NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO),'^[0-9]{4}(0[1-9]|1[0-2])$');
+  DELETE FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+  WHERE  NOT REGEXP_LIKE(TO_CHAR(DT_COMPETENCIA_MOVIMENTACAO),'^[0-9]{4}(0[1-9]|1[0-2])$');
+  COMMIT;
+  -- risco: janela entre carga e limpeza com duplicatas no fato; e so funciona se os anos LIMPOS
+  --        nao tiverem truncadas legitimas (confirmado na varredura: limpos tem 0).
+
+--- PLANO COMPLETO DE RECARGA (apos o job DARDO + regeracao dos CSVs) ---
+  1. DARDO concluido -> rodar P_BGE_ETL_001_MIGRA_CAGED_V1 -> regerar CSVs (1996,2000,2001,2002,2003,2011).
+  2. Subir os CSVs ao bucket-bgetrab-prod.
+  3. Verificar aderencia com scripts/scan_menu.ps1 (criterio 1): esperado 0 fora de AAAAMM.
+  4. PARA 1996/2002/2003: executar a Estrategia 1 (DELETE por DT_COMPETENCIA) ANTES de recarregar.
+  5. Recarregar cada ano via TASK_FATOS_CAGED_TRABS_AJUSTADO (2000/2001/2011 podem ir direto).
+  6. Validar no ADW: 0 linhas com DT_COMPETENCIA_MOVIMENTACAO fora de AAAAMM; e conferir que NAO ha
+     duplicatas (contagem por ano bate com records-written da run).
+
+STATUS: SQL preparado para revisao/execucao manual pelo usuario no ADW. Aguardando o job DARDO concluir
+e os CSVs serem regerados. O assistente NAO executa SQL (OCI CLI nao roda SQL) nem acao destrutiva sem
+confirmacao explicita por operacao.
+
+### RECARGA VIA PIPELINE (SQL Task DELETE -> Integration Task carga) - preferido - 2026-10-21
+
+Pergunta do usuario: como rodar o DELETE antes da carga usando um Pipeline do Data Integration.
+Resposta: encadear uma SQL Task (DELETE) ANTES da Integration Task (carga) num Pipeline, com
+dependencia on-success. O projeto JA usa esse padrao para o RAIS (SQLTASK_APAGA_ANO_RAIS +
+pipeline de carga; existem tambem SQL_TASK_PRC_APAGA_DI_ANO_RAIS, SQL_Task_TRUNCATE_FT_RAIS_...).
+Esta e a abordagem PREFERIDA (automatizada, versionada, parametrizada por ano) - substitui o
+DELETE manual no ADW registrado antes (que fica como fallback).
+
+Nota tecnica: em PROD os objetos (tasks/data flows) NAO aparecem em task list do workspace de
+producao - estao PUBLICADOS na application APL_BGETRAB_2. O get-published-object da SQL Task vem
+resumido (sem o script SQL). O design (com SQL e parametros) vive no Workspace_BGETRAB_DEV
+(ocid1.disworkspace.oc1.sa-saopaulo-1.antxeljr2ow634yauzbm5cvf2woep5yral3xu5ynejocp4zuabclvfgt6lpa).
+Montar a SQL Task/pipeline novos no DEV e publicar na APL_BGETRAB_2.
+
+MONTAGEM (no Data Integration Designer, workspace DEV):
+  1. SQL Task (nova), ex.: SQLTASK_APAGA_ANO_CAGED
+     - Data asset : DA_ADW_BGETRAB_PROD | schema BGETRAB_OAC
+     - Parametro  : P_ANO (varchar, ex.: "1996")
+     - SQL:
+         DELETE FROM BGETRAB_OAC.V1_FATOS_CAGED_TRABS_AJUSTADO
+         WHERE SUBSTR(TO_CHAR(DT_COMPETENCIA),1,4) = :P_ANO
+  2. Pipeline (novo), ex.: PIPELINE_RECARGA_CAGED_ANO
+     - No 1: SQLTASK_APAGA_ANO_CAGED
+     - No 2: TASK_FATOS_CAGED_TRABS_AJUSTADO (carga)
+     - Ligar saida do No 1 -> entrada do No 2 (dependencia ON SUCCESS).
+     - Parametros do pipeline: P_ANO (alimenta a SQL Task) e PARAMETER_ARQ (CSV do ano, alimenta
+       a carga). Pode derivar PARAMETER_ARQ de P_ANO ou declarar os dois.
+  3. Publicar o pipeline na application APL_BGETRAB_2 e executar por ano.
+
+VANTAGENS / CUIDADOS:
+  - IDEMPOTENTE: para 2000/2001/2011 (nunca carregados) o DELETE nao acha nada e segue - o mesmo
+    pipeline serve para TODOS os anos afetados (1996,2000,2001,2002,2003,2011) e futuros reprocessos.
+  - Resolve a DUPLICACAO do MERGE: o delete remove as linhas antigas (inclusive truncadas) antes,
+    entao o MERGE insere as corrigidas sem colidir.
+  - Dependencia ON SUCCESS: a carga so roda se o delete tiver sucesso.
+  - Commit: SQL Task do DI roda em transacao propria e commita ao fim; o No 2 (MERGE) ja ve o
+    delete commitado. Confirmar no Designer.
+  - Filtro por ano (DT_COMPETENCIA): ressalva de movimentacao retroativa que atravesse o ano-
+    calendario; rodar o PASSO 0 (diagnostico) uma vez para validar as contagens antes de confiar.
+  - DESTRUTIVO em PROD: o DELETE apaga dados do fato. Validar o P_ANO e as contagens antes de
+    executar em producao.
+
+### ACESSO AO APEX (BGETRAB_OAC) VIA BASTION - PADRAO RECORRENTE - 2026-10-21
+
+Contexto fixo (sempre assim): o usuario acessa o ADW de desenvolvimento pelo APEX (web). O fluxo e:
+  1. Criar uma sessao de Bastion do tipo PORT FORWARDING ate o ADW.
+  2. O assistente retorna o SSH COMMAND da sessao para o usuario abrir o tunel.
+  3. Com o tunel ativo, o usuario acessa o APEX pelo navegador (porta 443).
+
+Parametros FIXOS desta sessao (reutilizar sempre):
+  - Nome da sessao   : Session-Angelo
+  - Bastion          : BastionBGETRABDEV
+      OCID: ocid1.bastion.oc1.sa-saopaulo-1.amaaaaaa2n4fqhiaicw4malxu4pzbkpg7rfy2q7spaxhhxyqrsulghxh6baa
+      target-subnet: ocid1.subnet.oc1.sa-saopaulo-1.aaaaaaaa25zvgrt6qkdfgxqfaj54fbp4s7mjepgf7woa6rb7xspxx5vvqvwq
+      (compartimento DEV: RITM0117727_BGETRAB_DEV)
+  - Tipo             : port forwarding (PORT_FORWARDING)
+  - IP privado alvo  : 10.217.48.81
+  - Porta            : 443 (APEX/Database Actions - acesso web; NAO e 1522 pois o uso e web)
+  - Chave PUBLICA    : C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key.pub
+      (ATENCAO: o arquivo .key no mesmo caminho e a chave PRIVADA - NAO usar/compartilhar;
+       a sessao usa a .pub. Chave privada correspondente: ...\ssh-key-2026-09-23.key)
+  - TTL              : padrao (10800s / 3h), salvo pedido diferente.
+
+Comando de criacao (OCI CLI):
+  oci bastion session create-port-forwarding ^
+    --bastion-id <OCID do BastionBGETRABDEV> ^
+    --display-name Session-Angelo ^
+    --ssh-public-key-file "<caminho .pub>" ^
+    --target-private-ip 10.217.48.81 ^
+    --target-port 443 ^
+    --session-ttl 10800 ^
+    --profile bgetrab-session --auth security_token
+
+Apos criar: consultar a sessao (oci bastion session get --session-id <id>) e extrair o
+ssh-metadata.command, que e o SSH command com o tunel (-L porta_local:10.217.48.81:443 ...).
+Entregar esse comando ao usuario; ele conecta o tunel e abre o APEX no navegador via localhost.
+
+OBS de ambiente: o endpoint "database.sa-saopaulo-1.oraclecloud.com" (usado por
+"oci db autonomous-database list/get") falha com SSLException pela inspecao TLS Kaspersky/Zscaler
+(mesmo com a raiz no bundle). Por isso NAO conseguimos listar o ADW via CLI - mas isso NAO impede
+criar a sessao de bastion (basta IP/porta/chave, ja fixados acima). Os comandos oci bastion ... funcionam.
+
+### FORMATO EXATO DO SSH COMMAND DO APEX (padrao do usuario) - 2026-10-21
+
+Sempre entregar o SSH command do tunel NESTE formato (o que comprovadamente funciona para o usuario):
+  - usar a CHAVE PRIVADA .key em -i (entre aspas, caminho com espacos)
+  - incluir a flag -v (verbose)
+  - porta LOCAL = 443 (mesma do alvo): -L 443:<IP-privado>:443
+  - -p 22 e <session-id>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
+
+Template:
+  ssh -i "<caminho-chave-privada>" -v -N -L 443:<IP-privado>:443 -p 22 <session-id>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
+
+Com os valores fixos do projeto:
+  ssh -i "C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key" -v -N -L 443:10.217.48.81:443 -p 22 <SESSION_ID>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
+  (substituir <SESSION_ID> pelo id da sessao recem-criada)
+
+Diferencas vs o comando bruto do OCI (ssh-metadata.command): preencher <privateKey> com a .key,
+adicionar -v, e usar <localPort>=443.
+Obs.: porta local 443 e privilegiada no Windows (pode exigir terminal como Administrador); acesso
+ao APEX no navegador via https://localhost/ (sem indicar porta, pois 443 e a padrao HTTPS).
+
+### URL DE ACESSO AO APEX (via tunel) - 2026-10-21
+Com o tunel ativo (porta local 443), o APEX e acessado em:
+  https://localhost/ords/_/landing
+(host local mapeia para 10.217.48.81:443 pelo tunel do bastion).
+
+### FERRAMENTA scripts/apex_tunnel.ps1 - acesso automatizado ao APEX - 2026-10-21
+
+Automatiza o acesso ao APEX (BGETRAB_OAC) via Bastion. Uso:
+  powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1
+  (de preferencia como ADMINISTRADOR, pois a porta local 443 e privilegiada)
+
+O que faz:
+  1. Valida a sessao OCI (perfil bgetrab-session); se expirada, instrui o oci session authenticate.
+  2. REUTILIZA a sessao de bastion ACTIVE chamada Session-Angelo (bastion session list); se nao
+     houver, CRIA uma nova (create-port-forwarding) e aguarda ficar ACTIVE.
+  3. Monta o SSH command no padrao do usuario: ssh -i "<.key>" -v -N -L 443:10.217.48.81:443 -p 22
+     <session-id>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
+  4. Abre o navegador em https://localhost/ords/_/landing (apos ~3s).
+  5. Inicia o tunel SSH em 1o plano (segura o terminal; fechar/CTRL+C derruba o tunel).
+
+Parametros fixos embutidos: bastion DEV, Session-Angelo, IP 10.217.48.81, porta 443/443, TTL 3h,
+chave privada .key e publica .key.pub (caminhos do usuario), APEX_URL.
+
+Login no APEX permanece MANUAL (nao automatizado - seguranca).
+Pontos de atencao: requer ssh (OpenSSH) no PATH; porta 443 privilegiada -> terminal Admin;
+o token OCI dura 60 min (se expirar, reautenticar antes de rodar). Testado: a listagem de sessao
+ACTIVE reconhece a Session-Angelo (reuso funciona).
+
+### AJUSTE apex_tunnel.ps1 - nome da sessao agora e PERGUNTADO - 2026-10-21
+O script nao usa mais nome fixo. Apos validar a sessao OCI, pergunta:
+  "Defina o nome da sessao? [padrao: Session-Angelo]"
+  - Enter (vazio) -> usa o padrao Session-Angelo.
+  - Nome digitado -> usa esse nome (tambem no reuso: procura sessao ACTIVE com esse display-name).
+Variavel $SESS_DEFAULT = Session-Angelo (padrao). $SESS_NAME passa a ser definido pelo prompt.
+
+### AJUSTES apex_tunnel.ps1 - default Session-APEX + porta 443 sem admin - 2026-10-21
+
+1. Nome padrao da sessao mudou de Session-Angelo para Session-APEX (prompt: "Defina o nome da
+   sessao? [padrao: Session-APEX]"; Enter usa o padrao).
+
+2. DESCOBERTA (testada): no ambiente do usuario (DATAPREV\angelo.paolino, NAO-admin) o bind em
+   porta local 443 FUNCIONA sem privilegios de administrador. No Windows, portas <1024 nao sao
+   restritas a admin por padrao (diferente do Linux). Logo o tunel -L 443:... roda sem elevacao.
+   Removidos do script: funcao Test-IsAdmin, o aviso de porta privilegiada e as mencoes a
+   "rodar como Administrador". A empresa nao da admin aos usuarios - e nao precisa.
+
+Teste de execucao: validada a parte critica (listener TCP na 443 abre como usuario comum);
+chamadas OCI (validar/listar/criar sessao bastion) ja testadas isoladamente. O script em si e
+interativo (Read-Host + tunel em 1o plano), entao roda no terminal do usuario.
