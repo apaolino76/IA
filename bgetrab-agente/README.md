@@ -1,4 +1,4 @@
-# Projeto BGETRAB (OCI) - Guia de Onboarding
+﻿# Projeto BGETRAB (OCI) - Guia de Onboarding
 
 Este repositorio contem o CONTEXTO e os PROCEDIMENTOS para operar os recursos
 OCI do projeto BGETRAB com o assistente (Kiro CLI) via OCI CLI.
@@ -8,13 +8,26 @@ OCI do projeto BGETRAB com o assistente (Kiro CLI) via OCI CLI.
 > compartilhe chaves privadas, passphrases ou tokens. Nunca os versione.
 
 ## Conteudo do repositorio
+
+Raiz (apenas documentacao, infra do repo e scripts de setup):
+- README.md .................... Este guia de onboarding.
 - oci-bgetrab.md ............... Fonte de verdade do projeto (OCIDs, buckets, schema, tasks, diagnosticos).
+- apex-bgetrab.md ............. Documentacao do APEX/ORDS (ADW BGETRAB_OAC); complementa o oci-bgetrab.md.
 - configuracao-agente-oci.md .. Como montar o ambiente: instalar OCI CLI, criar o agente oci.json, troubleshooting.
+- .gitignore .................. Protege contra commit acidental de segredos e dados (LGPD).
+- setup-oci-bgetrab.ps1 ........ Configura o bundle de CA (Kaspersky) e as variaveis de ambiente. Rodar da raiz.
+- install-agent.ps1 ........... Copia o agents/oci.json para a pasta de agentes do seu perfil. Rodar da raiz.
+
+Subpastas:
 - .amazonq/rules/bgetrab.md .... Regra carregada automaticamente pelo agente neste diretorio.
-- setup-oci-bgetrab.ps1 ........ Script que configura o bundle de CA (Kaspersky) e as variaveis de ambiente.
-- .gitignore .................. Protege contra commit acidental de segredos.
 - agents/oci.json ............. Modelo versionado do agente OCI (mesmo arquivo para todas as maquinas).
-- install-agent.ps1 ........... Copia o agents/oci.json para a pasta de agentes do seu perfil (%USERPROFILE%\.kiro\agents).
+- scripts/ .................... Scripts reutilizaveis: apex_tunnel.ps1 (tunel bastion), scan_menu.ps1 (varredura),
+                                monitor_run.ps1 (monitor de task-run do Data Integration).
+- scripts/resultados/ ......... Saidas agregadas da varredura (sem PII) - unico conteudo de dados versionado.
+- cargas/<ano>/ ............... Artefatos de carga por ano do Data Integration (cfg_provider_*.json, reg_meta_*.json).
+                                NAO versionados (podem referenciar dados pessoais).
+- analises/ ................... Comparacoes e diagnosticos (ex.: _cmp_*.txt). NAO versionados.
+- imagens/ .................... Prints de consultas (LGPD). NAO versionados.
 
 ## Pre-requisitos
 1. OCI CLI instalado (ver configuracao-agente-oci.md para o passo a passo no Windows).

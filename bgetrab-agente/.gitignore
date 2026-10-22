@@ -37,10 +37,13 @@ desktop.ini
 .DS_Store
 
 # ===== Dados de carga / artefatos do projeto (nao versionar) =====
-# Metadados e configs de carga por ano (podem referenciar dados pessoais)
+# Artefatos de carga por ano vivem em cargas/<ano>/ (podem referenciar dados pessoais).
+# Os globs abaixo casam em qualquer subpasta (cargas/2002/..., scripts/..., etc.).
+cargas/
 reg_meta_*.json
 cfg_provider_*.json
-# Comparacoes e dumps
+# Comparacoes, diagnosticos e dumps vivem em analises/
+analises/
 _cmp_*.txt
 _full_*.csv
 # Scripts de execucao/monitoramento gerados
