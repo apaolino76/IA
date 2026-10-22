@@ -1,0 +1,261 @@
+﻿<#
+  apex_tunnel.ps1 - Acesso automatizado ao APEX (BGETRAB_OAC) via Bastion (port forwarding).
+  Projeto BGETRAB (OCI).
+
+  Faz: 1) valida sessao OCI; 2) reutiliza a sessao de Bastion ACTIVE (ou cria uma nova);
+       3) monta o SSH command no padrao do usuario (-v, chave privada, porta local 443);
+       4) abre o navegador no APEX; 5) inicia o tunel SSH em 1o plano.
+
+  Login no APEX permanece MANUAL (nao automatizado - seguranca).
+
+  Requisitos: sessao OCI valida (perfil bgetrab-session); OpenSSH (ssh) no PATH;
+  par de chaves SSH (a chave PUBLICA ja registrada/aceita pelo bastion).
+
+  O caminho das chaves NAO e fixo. Resolucao, em ordem de prioridade:
+    1) parametros -PrivKey / -PubKey;
+    2) variaveis de ambiente BGETRAB_SSH_PRIV_KEY / BGETRAB_SSH_PUB_KEY;
+    3) autodescoberta em %USERPROFILE%\.ssh (par *.key + *.key.pub, ou id_*).
+  Se a .pub nao for informada, assume-se "<priv>.pub".
+
+  Uso:
+    powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1
+    powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1 -PrivKey "C:\caminho\minha-chave.key"
+#>
+
+param(
+  # Caminho da chave PRIVADA SSH. Se omitido, usa env BGETRAB_SSH_PRIV_KEY ou autodescoberta em ~/.ssh.
+  [string] $PrivKey,
+  # Caminho da chave PUBLICA SSH. Se omitido, usa env BGETRAB_SSH_PUB_KEY ou "<PrivKey>.pub".
+  [string] $PubKey,
+  # Se a sessao OCI estiver invalida, tenta renovar (refresh) e, se falhar, autentica (abre navegador).
+  # Ligado por padrao. Use -AutoAuth:$false para apenas avisar e sair (comportamento antigo).
+  [switch] $AutoAuth = $true
+)
+
+$ErrorActionPreference = 'Stop'
+
+# ---- Parametros fixos (memoria do projeto) ----
+$NS         = 'grmu0oy5wsd9'
+$PROFILE    = 'bgetrab-session'
+$BASTION_ID = 'ocid1.bastion.oc1.sa-saopaulo-1.amaaaaaa2n4fqhiaicw4malxu4pzbkpg7rfy2q7spaxhhxyqrsulghxh6baa'
+$SESS_DEFAULT = 'Session-APEX'   # nome padrao (Enter aceita); perguntado ao usuario adiante
+$TARGET_IP  = '10.217.48.81'
+$TARGET_PORT= 443
+$LOCAL_PORT = 443
+$TTL        = 10800
+# ---- Resolucao do caminho das chaves SSH (parametro > env > autodescoberta em ~/.ssh) ----
+function Resolve-SshKeys {
+  param([string]$PrivArg, [string]$PubArg)
+
+  # 1) Chave privada: parametro -> env -> autodescoberta
+  $priv = $PrivArg
+  if (-not $priv) { $priv = $env:BGETRAB_SSH_PRIV_KEY }
+  if (-not $priv) {
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    if (Test-Path $sshDir) {
+      # Preferir um par *.key (padrao OCI); senao id_* (sem extensao .pub)
+      $cand = Get-ChildItem -Path $sshDir -Filter '*.key' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      if (-not $cand) {
+        $cand = Get-ChildItem -Path $sshDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^id_' -and $_.Extension -ne '.pub' } |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      }
+      if ($cand) { $priv = $cand.FullName }
+    }
+  }
+  if (-not $priv) {
+    throw "Chave privada SSH nao encontrada. Informe via -PrivKey, a variavel BGETRAB_SSH_PRIV_KEY, ou coloque o par em %USERPROFILE%\.ssh."
+  }
+  if (-not (Test-Path $priv)) { throw "Chave privada nao existe no caminho: $priv" }
+
+  # 2) Chave publica: parametro -> env -> "<priv>.pub"
+  $pub = $PubArg
+  if (-not $pub) { $pub = $env:BGETRAB_SSH_PUB_KEY }
+  if (-not $pub) { $pub = "$priv.pub" }
+  if (-not (Test-Path $pub)) { throw "Chave publica nao existe no caminho: $pub (informe -PubKey ou BGETRAB_SSH_PUB_KEY)" }
+
+  return [pscustomobject]@{ Priv = $priv; Pub = $pub }
+}
+
+$keys = Resolve-SshKeys -PrivArg $PrivKey -PubArg $PubKey
+$PRIV_KEY = $keys.Priv
+$PUB_KEY  = $keys.Pub
+Write-Host ("Chave privada: {0}" -f $PRIV_KEY) -ForegroundColor DarkGray
+Write-Host ("Chave publica: {0}" -f $PUB_KEY)  -ForegroundColor DarkGray
+$APEX_URL   = 'https://localhost/ords/_/landing'
+
+$bundle = $env:OCI_CLI_CA_BUNDLE
+if (-not $bundle) { $bundle = Join-Path $env:USERPROFILE '.oci\oci-ca-bundle.pem' }
+
+function Invoke-Oci([string[]]$ociArgs,[int]$timeout=60) {
+  $job = Start-Job -ArgumentList $bundle,$ociArgs -ScriptBlock {
+    param($b,$a)
+    $env:OCI_CLI_CA_BUNDLE=$b; $env:REQUESTS_CA_BUNDLE=$b; $env:SSL_CERT_FILE=$b
+    & oci @a 2>&1
+  }
+  if (Wait-Job $job -Timeout $timeout) { $r = Receive-Job $job } else { Stop-Job $job; $r = 'TIMEOUT' }
+  Remove-Job $job -Force
+  return ($r | Out-String)
+}
+
+
+# ---- 1) validar sessao OCI (com auto-refresh / auto-authenticate) ----
+$REGION = 'sa-saopaulo-1'
+
+function Test-OciSession {
+  $r = Invoke-Oci @('os','ns','get','--profile',$PROFILE,'--auth','security_token') 30
+  return ($r -match $NS)
+}
+
+Write-Host 'Validando sessao OCI...' -ForegroundColor Yellow
+if (Test-OciSession) {
+  Write-Host 'Sessao OCI OK.' -ForegroundColor Green
+}
+elseif (-not $AutoAuth) {
+  # Comportamento antigo: apenas instruir e sair.
+  Write-Host 'Sessao OCI invalida/expirada. Rode em outro terminal:' -ForegroundColor Red
+  Write-Host ("  oci session authenticate --region {0}   (perfil: {1})" -f $REGION, $PROFILE) -ForegroundColor Cyan
+  return
+}
+else {
+  Write-Host 'Sessao OCI invalida/expirada. Tentando renovar (refresh)...' -ForegroundColor Yellow
+
+  # (a) refresh silencioso (nao-interativo, com timeout via job)
+  $null = Invoke-Oci @('session','refresh','--profile',$PROFILE) 60
+  if (Test-OciSession) {
+    Write-Host 'Sessao renovada via refresh. OK.' -ForegroundColor Green
+  }
+  else {
+    # (b) authenticate interativo (abre o navegador) - roda no terminal principal, NAO em job.
+    Write-Host 'Refresh nao resolveu. Iniciando autenticacao (o navegador vai abrir)...' -ForegroundColor Yellow
+    Write-Host ("  Faca o login na console. Quando pedir o nome do perfil, use: {0}" -f $PROFILE) -ForegroundColor Cyan
+
+    $envBundle = $bundle
+    $env:OCI_CLI_CA_BUNDLE  = $envBundle
+    $env:REQUESTS_CA_BUNDLE = $envBundle
+    $env:SSL_CERT_FILE      = $envBundle
+    try {
+      & oci session authenticate --region $REGION --profile-name $PROFILE
+    } catch {
+      Write-Host ("Falha ao iniciar a autenticacao: {0}" -f $_.Exception.Message) -ForegroundColor Red
+      return
+    }
+
+    # Revalidar apos o login manual.
+    Write-Host 'Revalidando a sessao apos o login...' -ForegroundColor Yellow
+    if (Test-OciSession) {
+      Write-Host 'Autenticacao concluida. Sessao OK.' -ForegroundColor Green
+    } else {
+      Write-Host 'Ainda sem sessao valida apos a autenticacao. Verifique o login e rode novamente.' -ForegroundColor Red
+      return
+    }
+  }
+}
+
+# ---- nome da sessao (perguntar; Enter usa o padrao) ----
+$resp = Read-Host ("Defina o nome da sessao? [padrao: {0}]" -f $SESS_DEFAULT)
+if ([string]::IsNullOrWhiteSpace($resp)) { $SESS_NAME = $SESS_DEFAULT } else { $SESS_NAME = $resp.Trim() }
+Write-Host ("Nome da sessao: {0}" -f $SESS_NAME) -ForegroundColor DarkGray
+
+
+# ---- 2) reutilizar sessao ACTIVE ou criar ----
+Write-Host 'Procurando sessao de bastion ACTIVE...' -ForegroundColor Yellow
+$sid = $null
+$lst = Invoke-Oci @('bastion','session','list','--bastion-id',$BASTION_ID,'--session-lifecycle-state','ACTIVE','--all','--profile',$PROFILE,'--auth','security_token') 60
+try {
+  $d = $lst | ConvertFrom-Json
+  $match = $d.data | Where-Object { $_.'display-name' -eq $SESS_NAME } | Select-Object -First 1
+  if ($match) { $sid = $match.id; Write-Host ("Reutilizando sessao ACTIVE: $sid") -ForegroundColor Green }
+} catch { }
+
+if (-not $sid) {
+  Write-Host 'Nenhuma sessao ACTIVE encontrada; criando nova...' -ForegroundColor Yellow
+  $cr = Invoke-Oci @('bastion','session','create-port-forwarding','--bastion-id',$BASTION_ID,'--display-name',$SESS_NAME,'--ssh-public-key-file',$PUB_KEY,'--target-private-ip',$TARGET_IP,'--target-port',"$TARGET_PORT",'--session-ttl',"$TTL",'--profile',$PROFILE,'--auth','security_token') 90
+  try { $sid = ($cr | ConvertFrom-Json).data.id } catch { }
+  if (-not $sid) { Write-Host 'Falha ao criar a sessao:' -ForegroundColor Red; Write-Host $cr; return }
+  Write-Host ("Sessao criada: $sid (aguardando ACTIVE)") -ForegroundColor Green
+  for ($t=1; $t -le 12; $t++) {
+    Start-Sleep 8
+    $g = Invoke-Oci @('bastion','session','get','--session-id',$sid,'--profile',$PROFILE,'--auth','security_token') 45
+    try { $st = ($g | ConvertFrom-Json).data.'lifecycle-state' } catch { $st = '?' }
+    Write-Host ("  tentativa $t : $st")
+    if ($st -eq 'ACTIVE') {
+      # O endpoint SSH do Bastion costuma levar alguns segundos a mais para
+      # aceitar a chave DEPOIS de a sessao reportar ACTIVE. Espera de folga
+      # para evitar "Permission denied (publickey)" por corrida de timing.
+      Write-Host '  Sessao ACTIVE; aguardando 15s para o endpoint SSH estabilizar...' -ForegroundColor DarkGray
+      Start-Sleep 15
+      break
+    }
+    if ($st -eq 'FAILED' -or $st -eq 'DELETED') { Write-Host "estado terminal: $st" -ForegroundColor Red; return }
+  }
+}
+
+# ---- 3) montar o SSH command (referencia/exibicao) ----
+$sshCmd = ('ssh -i "{0}" -v -N -L {1}:{2}:{3} -p 22 {4}@host.bastion.sa-saopaulo-1.oci.oraclecloud.com' -f `
+           $PRIV_KEY, $LOCAL_PORT, $TARGET_IP, $TARGET_PORT, $sid)
+Write-Host ''
+Write-Host '=== SSH command (tunel) ===' -ForegroundColor Cyan
+Write-Host $sshCmd
+Write-Host ''
+
+$sshHost = "$sid@host.bastion.sa-saopaulo-1.oci.oraclecloud.com"
+
+# ---- 4) iniciar o tunel com RETRY automatico ----
+# O endpoint SSH do Bastion pode recusar a chave (Permission denied) logo apos a sessao
+# ficar ACTIVE (corrida de timing). Fazemos ate N tentativas: cada tentativa roda o ssh
+# em background; se a porta local 443 passar a escutar, o tunel subiu e trazemos para 1o plano.
+$maxTries   = 5
+$browserFired = $false
+
+for ($try = 1; $try -le $maxTries; $try++) {
+  Write-Host ("Iniciando tunel SSH (tentativa {0}/{1})..." -f $try, $maxTries) -ForegroundColor Yellow
+
+  # ssh em background para conseguirmos sondar a porta; -v para diagnostico se falhar.
+  $ssh = Start-Process -FilePath 'ssh' -PassThru -NoNewWindow -ArgumentList @(
+    '-i', "`"$PRIV_KEY`"", '-v', '-N',
+    '-o', 'ExitOnForwardFailure=yes',
+    '-o', 'ServerAliveInterval=30',
+    '-L', "$LOCAL_PORT`:$TARGET_IP`:$TARGET_PORT",
+    '-p', '22', $sshHost
+  )
+
+  # Aguarda ate 15s pela porta local escutar OU o processo ssh morrer.
+  $up = $false
+  for ($w = 1; $w -le 15; $w++) {
+    Start-Sleep 1
+    if ($ssh.HasExited) { break }
+    $listen = Get-NetTCPConnection -LocalPort $LOCAL_PORT -State Listen -ErrorAction SilentlyContinue |
+              Where-Object { $_.OwningProcess -eq $ssh.Id }
+    if ($listen) { $up = $true; break }
+  }
+
+  if ($up) {
+    Write-Host ("Tunel ATIVO (porta local {0}). PID ssh: {1}" -f $LOCAL_PORT, $ssh.Id) -ForegroundColor Green
+    if (-not $browserFired) {
+      Start-Job -ArgumentList $APEX_URL -ScriptBlock { param($u); Start-Sleep 2; Start-Process $u } | Out-Null
+      Write-Host ("Navegador abrira em ~2s: $APEX_URL") -ForegroundColor Green
+      $browserFired = $true
+    }
+    Write-Host 'Login no APEX e MANUAL. Feche esta janela/CTRL+C para encerrar o tunel.' -ForegroundColor Yellow
+    Write-Host ''
+    # Segura o terminal ate o ssh terminar (mantem o tunel vivo).
+    Wait-Process -Id $ssh.Id
+    return
+  }
+
+  # Nao subiu: encerrar este ssh (se ainda vivo) e decidir sobre retry.
+  if (-not $ssh.HasExited) { Stop-Process -Id $ssh.Id -Force -ErrorAction SilentlyContinue }
+  if ($try -lt $maxTries) {
+    Write-Host '  Tunel nao subiu (provavel timing do endpoint SSH). Aguardando 10s e tentando de novo...' -ForegroundColor DarkYellow
+    Start-Sleep 10
+  } else {
+    Write-Host 'Nao foi possivel estabelecer o tunel apos varias tentativas.' -ForegroundColor Red
+    Write-Host 'Rode o SSH manualmente para ver o log completo e diagnosticar:' -ForegroundColor Red
+    Write-Host ("  {0}" -f $sshCmd) -ForegroundColor Cyan
+    Write-Host 'Se persistir "Permission denied (publickey)", tente forcar o algoritmo:' -ForegroundColor DarkGray
+    Write-Host '  acrescente  -o PubkeyAcceptedAlgorithms=+ssh-rsa -o HostKeyAlgorithms=+ssh-rsa' -ForegroundColor DarkGray
+    return
+  }
+}
