@@ -5,7 +5,7 @@ Uso: contexto para operar os recursos via OCI CLI.
 
 > Observacao de seguranca: este arquivo contem apenas nomes e identificadores publicos (OCID, namespace, regiao). NAO armazenar chaves privadas, senhas, passphrases ou tokens.
 
-Ultima atualizacao: 2026-10-17
+Ultima atualizacao: 2026-10-22
 
 ## Tenancy
 
@@ -57,7 +57,7 @@ Ultima atualizacao: 2026-10-17
 
 | Variavel | Valor | Finalidade |
 |----------|-------|------------|
-| OCI_CLI_CA_BUNDLE | C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem | Bundle de CA para comandos de servico (Kaspersky) |
+| OCI_CLI_CA_BUNDLE | C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem | Bundle de CA para comandos de servico (inspecao TLS: Kaspersky + Zscaler) |
 | REQUESTS_CA_BUNDLE | C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem | Bundle de CA para chamadas requests (session refresh/authenticate) |
 | SSL_CERT_FILE | C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem | Bundle de CA para camada ssl do Python |
 | OCI_CLI_AUTH | security_token | Usa autenticacao por token de sessao por padrao |
@@ -65,13 +65,28 @@ Ultima atualizacao: 2026-10-17
 
 ### Observacoes importantes de ambiente
 
-1. Interceptacao TLS do Kaspersky: o antivirus faz inspecao HTTPS e re-assina os
-   certificados. O OCI CLI (Python/certifi) nao confia na CA do Kaspersky por padrao,
-   o que fazia os comandos travarem ou falharem com CERTIFICATE_VERIFY_FAILED.
-   Solucao: bundle de CA combinado + 3 variaveis apontando para ele.
-   - CA Kaspersky exportada: C:\Users\angelo.paolino\.oci\kaspersky-ca.pem
-   - Bundle combinado (certifi + Kaspersky): C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem
-   - Thumbprint da CA Kaspersky: 8481199B42DFEF3EBB86733E33E5CAA8337BD850
+1. Interceptacao TLS (DUAS camadas neste ambiente): o trafego HTTPS e re-assinado
+   por DOIS inspetores TLS distintos, cada um com a SUA CA:
+     a) Kaspersky (antivirus local) - CN=Kaspersky Endpoint Security Personal
+        Certification Authority. Thumbprint 8481199B42DFEF3EBB86733E33E5CAA8337BD850.
+     b) Zscaler (proxy de inspecao corporativo) - CN=Zscaler Root CA.
+        Thumbprint 0D23EE8F0F0560B9F68F2437C526D3CDF1FAF0C5.
+   O OCI CLI (Python/certifi) valida SOMENTE pelo arquivo PEM (o curl do Windows usa
+   a store do SO e por isso "engana" o diagnostico, validando mesmo quando o CLI falha).
+   Se QUALQUER uma dessas CAs faltar no bundle, alguns endpoints falham com
+   CERTIFICATE_VERIFY_FAILED ("unable to get local issuer certificate").
+   - DESCOBERTA (2026-10-22): os endpoints variam de inspetor. Object Storage
+     (objectstorage...) e Identity (auth/iam) passavam so com a CA Kaspersky, mas o
+     servico Database (database.sa-saopaulo-1.oraclecloud.com, usado por
+     "oci db autonomous-database ...") e re-assinado pela Zscaler. Sem a CA Zscaler,
+     SO o Database falhava com CERTIFICATE_VERIFY_FAILED, enquanto os demais funcionavam.
+   Solucao: bundle combinado (certifi + TODAS as CAs de inspecao) + 3 variaveis.
+   - Bundle combinado: C:\Users\angelo.paolino\.oci\oci-ca-bundle.pem (145 certs:
+     143 do certifi + Kaspersky + Zscaler)
+   - O setup-oci-bgetrab.ps1 foi atualizado (2026-10-22) para detectar e incluir
+     AUTOMATICAMENTE todas as CAs de inspecao conhecidas (Kaspersky, Zscaler,
+     Fortinet, Netskope, Palo Alto, etc.), deduplicando por thumbprint. Basta rodar
+     o script novamente se um endpoint novo falhar por TLS.
    - IMPORTANTE: os comandos "oci session refresh/authenticate" acessam
      auth.sa-saopaulo-1.oraclecloud.com e NAO respeitam OCI_CLI_CA_BUNDLE.
      Por isso definimos REQUESTS_CA_BUNDLE e SSL_CERT_FILE, que cobrem esse caso.
@@ -1351,6 +1366,47 @@ Comando usado para ler a transformacao (reuso):
 Sequencia da pergunta anterior (formato AAAAMM): a CARGA grava correto (CAST AS NUMERIC(6,0)),
 mas a ORIGEM (CSV gerado pelo BODS) entrega valores corrompidos em DT_COMPETENCIA_MOVIMENTACAO
 para alguns anos. Hipotese (b) do usuario CONFIRMADA.
+
+#### REANALISE do arquivo NOVO de 1996 (regenerado) - 2026-10-22
+
+Contexto: o usuario subiu um FATOS_CAGED_TRABS_AJUSTADO_1996.csv NOVO ao bucket-bgetrab-prod
+(modificado 2026-10-22 ~12:56 UTC, ~4,3 GB). Reverificado o campo DT_COMPETENCIA_MOVIMENTACAO
+(coluna 3) por range download. Resultado: AINDA NAO aderente - o defeito persiste e o PADRAO MUDOU.
+
+Estrutura/formato gerais do arquivo (OK): 50 colunas, header identico ao schema, delimitador ";",
+UTF-8 sem BOM, DT_COMPETENCIA (col 2) correta em AAAAMM (ex.: 199608).
+
+DT_COMPETENCIA_MOVIMENTACAO (col 3): 100% fora de AAAAMM na amostra (antes eram ~64%).
+Amostra de ~20 MB do inicio = 93.264 linhas de dados.
+
+Distribuicao de comprimento (so digitos) na amostra:
+  - 4 digitos: 48.319  (ex.: "1996")
+  - 5 digitos: 43.227  (ex.: "11996", "21996", "31996")
+  - 6 digitos:  1.718  (ex.: "121995", "111995", "101995")
+
+Valores crus mais comuns de C3 (amostra): 1996 (47.737), 11996 (20.123), 21996 (15.018),
+31996 (7.397), 121995 (859), 111995 (502), 1995 (446), 101995 (290), 21995 (217), 11995 (127).
+
+TESTE "falta so zero a esquerda?" (left-pad para 6) -> NAO resolve: 0 de 93.264 ficam validas.
+Ex.: C3="1996" -> pad "001996" -> mes "96" INVALIDO. Portanto NAO e simples perda de zero a
+esquerda de um AAAAMM.
+
+LEITURA DO PADRAO (inferencia): o campo parece estar em ordem INVERTIDA (mes+ano, MMAAAA) e SEM
+zero-fill do mes. Ex.: "121995" = mes 12 + ano 1995 (= deveria ser 199512); "111995" = 199511;
+"101995" = 199510. Os de 1 digito de mes viram "M"+"AAAA" ("11996"=mes1/1996, "21996"=mes2/1996).
+Os de 4 digitos ("1996") tem o mes perdido/ambiguo e NAO sao recuperaveis com seguranca.
+
+Diferenca vs sintoma antigo: antes (2026-10-19) eram valores curtos/erraticos ("9619","99601","20",
+"120") atribuidos a INT escrito sem zero a esquerda; agora o arquivo regenerado traz mes e ano
+aparentemente concatenados em ordem trocada. A conclusao operacional e a mesma: a correcao TEM
+que ser na ORIGEM (BODS) - padding simples nao recupera; e os casos de 4 digitos (so ano) nao tem
+mes recuperavel. NAO carregar/recarregar 1996 a partir deste arquivo.
+
+Ressalva: amostra do inicio (~20 MB); % exato sobre os 4,3 GB exige varredura completa (scan_menu.ps1).
+
+Confirmacao independente (scan_menu.ps1, modo Amostragem, 2026-10-22 10:25): 1996 -> 409.892 linhas,
+409.892 fora de AAAAMM (100,00%), 0 desalinhadas (estrutura 50 campos OK), PIS 100% mascarado;
+situacao AFETADO. Registrado em scripts/resultados/scan_resultados.{csv,log}.
 
 #### Sintoma (dados reais do bucket, amostragem por range download)
 

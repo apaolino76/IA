@@ -61,10 +61,18 @@ IMPORTANTE: este comando abre o navegador e aguarda login manual.
 - Usar "--output table" quando ajudar na legibilidade.
 - Nunca exibir nem manusear chaves privadas, passphrases ou tokens.
 
-## Particularidades do ambiente (Windows + Kaspersky)
+## Particularidades do ambiente (Windows + inspecao TLS: Kaspersky + Zscaler)
 - O shell e PowerShell. NAO usar sintaxe de here-doc de bash (<< EOF).
-- O antivirus Kaspersky intercepta TLS. Sem o bundle de CA, os comandos "oci"
-  travam ou falham com CERTIFICATE_VERIFY_FAILED.
+- O trafego HTTPS passa por DUAS camadas de inspecao TLS, cada uma com a SUA CA:
+  Kaspersky (antivirus local) e Zscaler (proxy corporativo). Sem AMBAS as CAs no
+  bundle, alguns comandos "oci" travam ou falham com CERTIFICATE_VERIFY_FAILED.
+  Os endpoints variam por inspetor: Object Storage/Identity passavam so com a CA
+  Kaspersky, mas o servico Database (oci db autonomous-database ...) e re-assinado
+  pela Zscaler e exige a CA Zscaler no bundle (descoberto em 2026-10-22). Se um
+  comando "oci" falhar com CERTIFICATE_VERIFY_FAILED, rode setup-oci-bgetrab.ps1
+  novamente (ele detecta e inclui todas as CAs de inspecao automaticamente).
+  Dica de diagnostico: se o "curl --cacert <bundle>" valida mas o OCI CLI falha,
+  o problema e CA de inspecao faltando no PEM (o curl usa a store do Windows).
 - Variaveis de ambiente ja persistidas (setx; valem em janelas novas):
     OCI_CLI_CA_BUNDLE, REQUESTS_CA_BUNDLE, SSL_CERT_FILE -> <HOME>\.oci\oci-ca-bundle.pem
     OCI_CLI_AUTH = security_token

@@ -35,29 +35,48 @@ if (-not $certifi) {
 if (-not $certifi) { Write-Host "   Nao encontrei o cacert.pem do certifi. Verifique a instalacao do OCI CLI." -ForegroundColor Red; exit 1 }
 Write-Host "   certifi: $certifi" -ForegroundColor Green
 
-# 2) Procurar a CA do Kaspersky nas stores do Windows
-Write-Host "2) Procurando CA do Kaspersky nas stores de certificados..."
-$kcert = $null
-foreach ($store in @("Cert:\CurrentUser\Root","Cert:\LocalMachine\Root")) {
-  $c = Get-ChildItem $store -ErrorAction SilentlyContinue | Where-Object { $_.Subject -match "Kaspersky" } | Select-Object -First 1
-  if ($c) { $kcert = $c; break }
+# 2) Procurar CAs de inspecao TLS nas stores do Windows
+#    Alem do Kaspersky (antivirus), ambientes corporativos usam proxies de
+#    inspecao TLS como Zscaler. Cada um reassina o certificado do servidor com
+#    a SUA CA. O curl do Windows valida pela store do SO, mas o Python do OCI
+#    CLI valida SOMENTE pelo arquivo PEM - por isso TODAS as CAs de inspecao
+#    precisam estar no bundle. Faltando alguma, apenas certos endpoints
+#    (ex.: database.<regiao>.oraclecloud.com) falham com CERTIFICATE_VERIFY_FAILED.
+Write-Host "2) Procurando CAs de inspecao TLS (Kaspersky, Zscaler, etc.)..."
+
+# Padroes de emissores de inspecao TLS conhecidos. Acrescente outros se necessario.
+$inspectionPatterns = @("Kaspersky","Zscaler","Fortinet","Fortigate","Netskope","Palo Alto","BlueCoat","Symantec Web","Cisco Umbrella","Forcepoint","McAfee Web","Sophos")
+$regex = ($inspectionPatterns | ForEach-Object { [regex]::Escape($_) }) -join "|"
+
+$stores = @("Cert:\CurrentUser\Root","Cert:\LocalMachine\Root","Cert:\CurrentUser\CA","Cert:\LocalMachine\CA")
+$found = @{}  # chave = thumbprint (dedup entre stores)
+foreach ($store in $stores) {
+  Get-ChildItem $store -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -match $regex -or $_.Issuer -match $regex } |
+    ForEach-Object {
+      if (-not $found.ContainsKey($_.Thumbprint)) { $found[$_.Thumbprint] = $_ }
+    }
 }
 
 $bundle = Join-Path $ociDir "oci-ca-bundle.pem"
 
-if ($kcert) {
-  Write-Host "   CA Kaspersky encontrada (thumbprint $($kcert.Thumbprint))." -ForegroundColor Green
-  $kpem = Join-Path $ociDir "kaspersky-ca.pem"
-  $bytes = $kcert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-  $b64 = [System.Convert]::ToBase64String($bytes, [System.Base64FormattingOptions]::InsertLineBreaks)
-  $pem = "-----BEGIN CERTIFICATE-----`r`n$b64`r`n-----END CERTIFICATE-----`r`n"
-  Set-Content -Path $kpem -Value $pem -Encoding ascii
-  # 3) Montar bundle combinado
-  $combinado = (Get-Content $certifi -Raw) + "`r`n# ---- CA Kaspersky (SSL inspection) ----`r`n" + (Get-Content $kpem -Raw)
-  Set-Content -Path $bundle -Value $combinado -Encoding ascii
-  Write-Host "3) Bundle combinado criado: $bundle" -ForegroundColor Green
+# 3) Montar bundle combinado: certifi + todas as CAs de inspecao encontradas
+$sb = New-Object System.Text.StringBuilder
+[void]$sb.Append((Get-Content $certifi -Raw))
+
+if ($found.Count -gt 0) {
+  foreach ($cert in $found.Values) {
+    $cn = ($cert.Subject -split ',')[0]
+    Write-Host "   CA de inspecao encontrada: $cn (thumbprint $($cert.Thumbprint))" -ForegroundColor Green
+    $bytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+    $b64   = [System.Convert]::ToBase64String($bytes, [System.Base64FormattingOptions]::InsertLineBreaks)
+    [void]$sb.Append("`r`n# ---- CA de inspecao TLS: $cn ----`r`n")
+    [void]$sb.Append("-----BEGIN CERTIFICATE-----`r`n$b64`r`n-----END CERTIFICATE-----`r`n")
+  }
+  Set-Content -Path $bundle -Value $sb.ToString() -Encoding ascii
+  Write-Host "3) Bundle combinado criado: $bundle ($($found.Count) CA(s) de inspecao + certifi)" -ForegroundColor Green
 } else {
-  Write-Host "   Nenhuma CA Kaspersky encontrada. Usando o certifi padrao como bundle." -ForegroundColor Yellow
+  Write-Host "   Nenhuma CA de inspecao TLS encontrada. Usando o certifi padrao como bundle." -ForegroundColor Yellow
   Copy-Item $certifi $bundle -Force
 }
 

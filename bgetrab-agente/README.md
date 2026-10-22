@@ -15,7 +15,7 @@ Raiz (apenas documentacao, infra do repo e scripts de setup):
 - apex-bgetrab.md ............. Documentacao do APEX/ORDS (ADW BGETRAB_OAC); complementa o oci-bgetrab.md.
 - configuracao-agente-oci.md .. Como montar o ambiente: instalar OCI CLI, criar o agente oci.json, troubleshooting.
 - .gitignore .................. Protege contra commit acidental de segredos e dados (LGPD).
-- setup-oci-bgetrab.ps1 ........ Configura o bundle de CA (Kaspersky) e as variaveis de ambiente. Rodar da raiz.
+- setup-oci-bgetrab.ps1 ........ Configura o bundle de CA (inspecao TLS: Kaspersky + Zscaler) e as variaveis de ambiente. Rodar da raiz.
 - install-agent.ps1 ........... Copia o agents/oci.json para a pasta de agentes do seu perfil. Rodar da raiz.
 
 Subpastas:
@@ -63,10 +63,15 @@ arquivos com BOM. O install-agent.ps1 preserva o arquivo como esta no repo.
 - Registre a chave PUBLICA no seu usuario (Console OCI > User Settings > API Keys).
 - Se a sua chave tiver passphrase, lembre-se dela (NAO a coloque em arquivos versionados).
 
-### 2. Resolver a intercepcao TLS do antivirus (se usar Kaspersky ou similar)
+### 2. Resolver a intercepcao TLS (Kaspersky e/ou Zscaler ou similar)
     powershell -ExecutionPolicy Bypass -File .\setup-oci-bgetrab.ps1
 Abra uma JANELA NOVA do terminal depois, para as variaveis valerem.
-Obs.: se voce NAO usa antivirus com inspecao TLS, o script detecta a ausencia da CA e avisa.
+Obs.: este ambiente tem DUAS camadas de inspeccao TLS (Kaspersky local + Zscaler
+corporativo). O script detecta e inclui AUTOMATICAMENTE todas as CAs de inspecao
+conhecidas no bundle. Endpoints diferentes podem ser re-assinados por inspetores
+diferentes (ex.: o servico Database exige a CA Zscaler). Se um comando "oci" falhar
+com CERTIFICATE_VERIFY_FAILED, rode este script novamente. Se voce NAO usa inspecao
+TLS, o script apenas usa o certifi padrao e avisa.
 
 ### 3. Autenticar por sessao (evita digitar passphrase a cada comando)
     oci session authenticate --region sa-saopaulo-1
