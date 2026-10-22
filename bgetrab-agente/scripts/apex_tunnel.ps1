@@ -26,7 +26,10 @@ param(
   # Caminho da chave PRIVADA SSH. Se omitido, usa env BGETRAB_SSH_PRIV_KEY ou autodescoberta em ~/.ssh.
   [string] $PrivKey,
   # Caminho da chave PUBLICA SSH. Se omitido, usa env BGETRAB_SSH_PUB_KEY ou "<PrivKey>.pub".
-  [string] $PubKey
+  [string] $PubKey,
+  # Se a sessao OCI estiver invalida, tenta renovar (refresh) e, se falhar, autentica (abre navegador).
+  # Ligado por padrao. Use -AutoAuth:$false para apenas avisar e sair (comportamento antigo).
+  [switch] $AutoAuth = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,15 +100,58 @@ function Invoke-Oci([string[]]$ociArgs,[int]$timeout=60) {
 }
 
 
-# ---- 1) validar sessao OCI ----
+# ---- 1) validar sessao OCI (com auto-refresh / auto-authenticate) ----
+$REGION = 'sa-saopaulo-1'
+
+function Test-OciSession {
+  $r = Invoke-Oci @('os','ns','get','--profile',$PROFILE,'--auth','security_token') 30
+  return ($r -match $NS)
+}
+
 Write-Host 'Validando sessao OCI...' -ForegroundColor Yellow
-$ns = Invoke-Oci @('os','ns','get','--profile',$PROFILE,'--auth','security_token') 30
-if ($ns -notmatch $NS) {
+if (Test-OciSession) {
+  Write-Host 'Sessao OCI OK.' -ForegroundColor Green
+}
+elseif (-not $AutoAuth) {
+  # Comportamento antigo: apenas instruir e sair.
   Write-Host 'Sessao OCI invalida/expirada. Rode em outro terminal:' -ForegroundColor Red
-  Write-Host '  oci session authenticate --region sa-saopaulo-1   (perfil: bgetrab-session)' -ForegroundColor Cyan
+  Write-Host ("  oci session authenticate --region {0}   (perfil: {1})" -f $REGION, $PROFILE) -ForegroundColor Cyan
   return
 }
-Write-Host 'Sessao OCI OK.' -ForegroundColor Green
+else {
+  Write-Host 'Sessao OCI invalida/expirada. Tentando renovar (refresh)...' -ForegroundColor Yellow
+
+  # (a) refresh silencioso (nao-interativo, com timeout via job)
+  $null = Invoke-Oci @('session','refresh','--profile',$PROFILE) 60
+  if (Test-OciSession) {
+    Write-Host 'Sessao renovada via refresh. OK.' -ForegroundColor Green
+  }
+  else {
+    # (b) authenticate interativo (abre o navegador) - roda no terminal principal, NAO em job.
+    Write-Host 'Refresh nao resolveu. Iniciando autenticacao (o navegador vai abrir)...' -ForegroundColor Yellow
+    Write-Host ("  Faca o login na console. Quando pedir o nome do perfil, use: {0}" -f $PROFILE) -ForegroundColor Cyan
+
+    $envBundle = $bundle
+    $env:OCI_CLI_CA_BUNDLE  = $envBundle
+    $env:REQUESTS_CA_BUNDLE = $envBundle
+    $env:SSL_CERT_FILE      = $envBundle
+    try {
+      & oci session authenticate --region $REGION --profile-name $PROFILE
+    } catch {
+      Write-Host ("Falha ao iniciar a autenticacao: {0}" -f $_.Exception.Message) -ForegroundColor Red
+      return
+    }
+
+    # Revalidar apos o login manual.
+    Write-Host 'Revalidando a sessao apos o login...' -ForegroundColor Yellow
+    if (Test-OciSession) {
+      Write-Host 'Autenticacao concluida. Sessao OK.' -ForegroundColor Green
+    } else {
+      Write-Host 'Ainda sem sessao valida apos a autenticacao. Verifique o login e rode novamente.' -ForegroundColor Red
+      return
+    }
+  }
+}
 
 # ---- nome da sessao (perguntar; Enter usa o padrao) ----
 $resp = Read-Host ("Defina o nome da sessao? [padrao: {0}]" -f $SESS_DEFAULT)

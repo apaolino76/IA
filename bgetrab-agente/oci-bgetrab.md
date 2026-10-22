@@ -2170,7 +2170,9 @@ Automatiza o acesso ao APEX (BGETRAB_OAC) via Bastion. Uso:
   (de preferencia como ADMINISTRADOR, pois a porta local 443 e privilegiada)
 
 O que faz:
-  1. Valida a sessao OCI (perfil bgetrab-session); se expirada, instrui o oci session authenticate.
+  1. Valida a sessao OCI (perfil bgetrab-session). Se invalida/expirada e -AutoAuth ligado (padrao):
+     tenta "oci session refresh"; se nao resolver, dispara "oci session authenticate" (abre o
+     navegador, login manual) e revalida. Com -AutoAuth:$false, apenas instrui e sai.
   2. REUTILIZA a sessao de bastion ACTIVE chamada Session-Angelo (bastion session list); se nao
      houver, CRIA uma nova (create-port-forwarding) e aguarda ficar ACTIVE.
   3. Monta o SSH command no padrao do usuario: ssh -i "<.key>" -v -N -L 443:10.217.48.81:443 -p 22
@@ -2185,7 +2187,7 @@ ou autodescoberta do par em %USERPROFILE%\.ssh.
 
 Login no APEX permanece MANUAL (nao automatizado - seguranca).
 Pontos de atencao: requer ssh (OpenSSH) no PATH; porta 443 privilegiada -> terminal Admin;
-o token OCI dura 60 min (se expirar, reautenticar antes de rodar). Testado: a listagem de sessao
+o token OCI dura 60 min (se expirar, o proprio script renova/reautentica por padrao). Testado: a listagem de sessao
 ACTIVE reconhece a Session-Angelo (reuso funciona).
 
 ### AJUSTE apex_tunnel.ps1 - nome da sessao agora e PERGUNTADO - 2026-10-21
