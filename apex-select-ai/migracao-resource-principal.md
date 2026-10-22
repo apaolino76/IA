@@ -22,7 +22,7 @@ problema "o chatbot so funciona para o login que o configurou" (ver copiloto-cha
 | Marcador | Onde obter | Valor |
 |---|---|---|
 | ADB_NAME | Autonomous que hospeda a app | DA_ADW_BGETRAB_PROD (confirmar nome do ADB) |
-| ADB_OCID | Pagina do Autonomous na OCI -> OCID | **[CONFIRMAR]** (usuario sem acesso a console; v$pdbs/v$containers sem privilegio - ORA-00942; `oci db autonomous-database` bloqueado pela inspecao TLS Kaspersky/Zscaler conforme oci-bgetrab.md. Obter via DBA/infra ou SQL dba_cloud_identity) |
+| ADB_OCID | Pagina do Autonomous na OCI -> OCID | **[CONFIRMAR]** (usuario sem acesso a console; v$pdbs/v$containers sem privilegio - ORA-00942. CLI: TLS resolvido em 2026-10-22 (CA Zscaler no bundle), mas `oci db autonomous-database list` da 403 Forbidden -> falta policy IAM `inspect autonomous-databases` no compartment DEV/PROD. Obter via: policy IAM + CLI, ou DBA (SELECT cloud_identity FROM v$pdbs), ou console OCI) |
 | DB_VERSION | 19c, 23ai ou 26ai (confirmar com DBA) | **26ai** (confirmado 2026-10-22; release 23.26.4.1.0). Etapa 4.2: criar sinonimo e permitido. |
 | IAM_DOMAIN | OCI -> Identity -> Domains (ex. Default) | **[CONFIRMAR]** |
 | PARSING_SCHEMA | APEX -> Edit Application Definition -> Parsing Schema | **BGETRAB_OAC** (confirmado 2026-10-22; apps 101 e 103) |

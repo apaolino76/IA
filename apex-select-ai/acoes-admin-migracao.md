@@ -35,13 +35,20 @@ Data: 2026-10-22
 ### Para o DBA / admin do banco
 
 1. **ADB_OCID** - o usuario da app (BGETRAB_OAC) nao consegue obter (sem privilegio em
-   v$pdbs/v$containers; e `oci db autonomous-database` esta bloqueado por inspecao TLS
-   no ambiente). Favor fornecer o OCID do Autonomous DA_ADW_BGETRAB_PROD, via:
+   v$pdbs/v$containers). A CLI `oci db autonomous-database list` ja CONECTA (TLS resolvido
+   em 2026-10-22 com a CA Zscaler no bundle), mas retorna **403 Forbidden** por falta de
+   policy IAM. Favor fornecer o OCID do Autonomous DA_ADW_BGETRAB_PROD por UMA destas vias:
 
+   a) Conceder a policy e obter via CLI:
+   ```text
+   Allow group <grupo-do-dev> to inspect autonomous-databases in compartment RITM0117727_BGETRAB_DEV
+   Allow group <grupo-do-dev> to inspect autonomous-databases in compartment RITM0117727_BGETRAB_PROD
+   ```
+   b) DBA executa:
    ```sql
    SELECT cloud_identity FROM v$pdbs;   -- o JSON traz DATABASE_OCID
    ```
-   ou copiar da console OCI (Autonomous Database -> OCID).
+   c) copiar da console OCI (Autonomous Database -> General Information -> OCID).
 
 2. **Habilitar Resource Principal** (ADMIN do banco). Como parsing schema, schema executor
    e dono da package sao todos BGETRAB_OAC, basta:

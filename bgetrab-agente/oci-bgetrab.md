@@ -2189,10 +2189,16 @@ Apos criar: consultar a sessao (oci bastion session get --session-id <id>) e ext
 ssh-metadata.command, que e o SSH command com o tunel (-L porta_local:10.217.48.81:443 ...).
 Entregar esse comando ao usuario; ele conecta o tunel e abre o APEX no navegador via localhost.
 
-OBS de ambiente: o endpoint "database.sa-saopaulo-1.oraclecloud.com" (usado por
-"oci db autonomous-database list/get") falha com SSLException pela inspecao TLS Kaspersky/Zscaler
-(mesmo com a raiz no bundle). Por isso NAO conseguimos listar o ADW via CLI - mas isso NAO impede
-criar a sessao de bastion (basta IP/porta/chave, ja fixados acima). Os comandos oci bastion ... funcionam.
+OBS de ambiente (ATUALIZADO 2026-10-22): o endpoint "database.sa-saopaulo-1.oraclecloud.com"
+(usado por "oci db autonomous-database list/get") era re-assinado pela Zscaler e falhava com
+CERTIFICATE_VERIFY_FAILED quando o bundle tinha APENAS a CA Kaspersky. Isso FOI RESOLVIDO:
+o setup-oci-bgetrab.ps1 agora inclui a CA Zscaler (e demais CAs de inspecao) no bundle, e a
+conexao TLS ao servico Database passou a funcionar. APOS o TLS ok, "oci db autonomous-database
+list" retorna 403 Forbidden (DEV/PROD/pai) -> o bloqueio REMANESCENTE e IAM, nao TLS: falta a
+policy "Allow group <grupo> to inspect autonomous-databases in compartment RITM0117727_BGETRAB_DEV"
+(e/ou _PROD). Com essa policy, da para obter o ADB_OCID via CLI. Alternativas: DBA
+(SELECT cloud_identity FROM v$pdbs) ou console OCI. Isso NAO impede criar a sessao de bastion
+(basta IP/porta/chave, ja fixados acima). Os comandos oci bastion ... funcionam.
 
 ### FORMATO EXATO DO SSH COMMAND DO APEX (padrao do usuario) - 2026-10-21
 

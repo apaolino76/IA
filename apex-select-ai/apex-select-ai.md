@@ -280,3 +280,23 @@ decisoes tomadas, correcoes. Cada entrada com data.)
   (uso real vs acesso potencial). Depois disso: encaminhar acoes-admin-migracao.md e executar
   Etapas 2-4 (admin IAM/DBA) e 5-9 (dev APEX), sempre pedindo confirmacao antes de acoes que
   alterem banco/config do chatbot.
+- 2026-10-22: CORRECAO IMPORTANTE sobre o ADB_OCID via CLI. Em sessao anterior o bloqueio de
+  `oci db autonomous-database list/get` foi atribuido a inspecao TLS (SSLException "mesmo com a
+  raiz no bundle"). Nesta sessao o diagnostico foi refinado e o TLS foi RESOLVIDO:
+    * O endpoint database.sa-saopaulo-1.oraclecloud.com e re-assinado pela **Zscaler**
+      (CN=Zscaler Root CA), nao pelo Kaspersky. O bundle do projeto so tinha a CA Kaspersky,
+      por isso SO o servico Database falhava com CERTIFICATE_VERIFY_FAILED, enquanto Object
+      Storage/Identity funcionavam. (curl validava via store do Windows, mascarando o problema.)
+    * Adicionada a CA Zscaler ao bundle e o setup-oci-bgetrab.ps1 foi generalizado para detectar
+      e incluir AUTOMATICAMENTE todas as CAs de inspecao (Kaspersky, Zscaler, etc.). Bundle agora
+      com 145 certs. Commit 048990d em origin/main (apaolino76/IA).
+    * APOS resolver o TLS, `oci db autonomous-database list` passou a CONECTAR e retornou
+      **403 Forbidden** em DEV, PROD e no compartment pai -> o bloqueio REAL agora e **IAM**, nao
+      TLS. Um `oci os bucket list` no mesmo compartment funcionou (sessao valida), isolando que
+      falta apenas a policy de database.
+  CONSEQUENCIA para o ADB_OCID: deixou de ser "impossivel por TLS". Agora e obtivel via CLI
+  assim que um admin conceder `Allow group <grupo> to inspect autonomous-databases in compartment
+  RITM0117727_BGETRAB_DEV` (e/ou _PROD). Alternativas inalteradas: DBA (SELECT cloud_identity
+  FROM v$pdbs) ou console OCI. Continua delegado/sem travar a migracao (so usado na Etapa 2).
+  NOTA: a sessao OCI expirou ao final desta sessao; reautenticar com
+  `oci session authenticate --region sa-saopaulo-1` (perfil bgetrab-session) antes de novos comandos.
