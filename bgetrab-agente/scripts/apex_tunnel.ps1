@@ -1,17 +1,33 @@
-<#
+﻿<#
   apex_tunnel.ps1 - Acesso automatizado ao APEX (BGETRAB_OAC) via Bastion (port forwarding).
   Projeto BGETRAB (OCI).
 
-  Faz: 1) valida sessao OCI; 2) reutiliza a sessao de Bastion ACTIVE "Session-Angelo"
-       (ou cria uma nova); 3) monta o SSH command no padrao do usuario (-v, chave privada,
-       porta local 443); 4) abre o navegador no APEX; 5) inicia o tunel SSH em 1o plano.
+  Faz: 1) valida sessao OCI; 2) reutiliza a sessao de Bastion ACTIVE (ou cria uma nova);
+       3) monta o SSH command no padrao do usuario (-v, chave privada, porta local 443);
+       4) abre o navegador no APEX; 5) inicia o tunel SSH em 1o plano.
 
   Login no APEX permanece MANUAL (nao automatizado - seguranca).
 
   Requisitos: sessao OCI valida (perfil bgetrab-session); OpenSSH (ssh) no PATH;
-  (porta local 443 funciona sem privilegios de admin neste ambiente Windows).
-  Uso: powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1
+  par de chaves SSH (a chave PUBLICA ja registrada/aceita pelo bastion).
+
+  O caminho das chaves NAO e fixo. Resolucao, em ordem de prioridade:
+    1) parametros -PrivKey / -PubKey;
+    2) variaveis de ambiente BGETRAB_SSH_PRIV_KEY / BGETRAB_SSH_PUB_KEY;
+    3) autodescoberta em %USERPROFILE%\.ssh (par *.key + *.key.pub, ou id_*).
+  Se a .pub nao for informada, assume-se "<priv>.pub".
+
+  Uso:
+    powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1
+    powershell -ExecutionPolicy Bypass -File .\scripts\apex_tunnel.ps1 -PrivKey "C:\caminho\minha-chave.key"
 #>
+
+param(
+  # Caminho da chave PRIVADA SSH. Se omitido, usa env BGETRAB_SSH_PRIV_KEY ou autodescoberta em ~/.ssh.
+  [string] $PrivKey,
+  # Caminho da chave PUBLICA SSH. Se omitido, usa env BGETRAB_SSH_PUB_KEY ou "<PrivKey>.pub".
+  [string] $PubKey
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -24,8 +40,46 @@ $TARGET_IP  = '10.217.48.81'
 $TARGET_PORT= 443
 $LOCAL_PORT = 443
 $TTL        = 10800
-$PRIV_KEY   = 'C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key'
-$PUB_KEY    = 'C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key.pub'
+# ---- Resolucao do caminho das chaves SSH (parametro > env > autodescoberta em ~/.ssh) ----
+function Resolve-SshKeys {
+  param([string]$PrivArg, [string]$PubArg)
+
+  # 1) Chave privada: parametro -> env -> autodescoberta
+  $priv = $PrivArg
+  if (-not $priv) { $priv = $env:BGETRAB_SSH_PRIV_KEY }
+  if (-not $priv) {
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    if (Test-Path $sshDir) {
+      # Preferir um par *.key (padrao OCI); senao id_* (sem extensao .pub)
+      $cand = Get-ChildItem -Path $sshDir -Filter '*.key' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      if (-not $cand) {
+        $cand = Get-ChildItem -Path $sshDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^id_' -and $_.Extension -ne '.pub' } |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      }
+      if ($cand) { $priv = $cand.FullName }
+    }
+  }
+  if (-not $priv) {
+    throw "Chave privada SSH nao encontrada. Informe via -PrivKey, a variavel BGETRAB_SSH_PRIV_KEY, ou coloque o par em %USERPROFILE%\.ssh."
+  }
+  if (-not (Test-Path $priv)) { throw "Chave privada nao existe no caminho: $priv" }
+
+  # 2) Chave publica: parametro -> env -> "<priv>.pub"
+  $pub = $PubArg
+  if (-not $pub) { $pub = $env:BGETRAB_SSH_PUB_KEY }
+  if (-not $pub) { $pub = "$priv.pub" }
+  if (-not (Test-Path $pub)) { throw "Chave publica nao existe no caminho: $pub (informe -PubKey ou BGETRAB_SSH_PUB_KEY)" }
+
+  return [pscustomobject]@{ Priv = $priv; Pub = $pub }
+}
+
+$keys = Resolve-SshKeys -PrivArg $PrivKey -PubArg $PubKey
+$PRIV_KEY = $keys.Priv
+$PUB_KEY  = $keys.Pub
+Write-Host ("Chave privada: {0}" -f $PRIV_KEY) -ForegroundColor DarkGray
+Write-Host ("Chave publica: {0}" -f $PUB_KEY)  -ForegroundColor DarkGray
 $APEX_URL   = 'https://localhost/ords/_/landing'
 
 $bundle = $env:OCI_CLI_CA_BUNDLE

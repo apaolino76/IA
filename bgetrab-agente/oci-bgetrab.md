@@ -1,4 +1,4 @@
-# Projeto OCI - BGETRAB
+﻿# Projeto OCI - BGETRAB
 
 Arquivo de referencia com as informacoes do projeto BGETRAB na Oracle Cloud Infrastructure (OCI).
 Uso: contexto para operar os recursos via OCI CLI.
@@ -489,7 +489,7 @@ Comando:
 Para outro ano: copiar o cfg_provider_2002.json para cfg_provider_<ANO>.json e trocar no
 entity.key do PARAMETER_ARQ o "..._2002.csv" pelo ano desejado.
 
-ARMADILHAS (lições aprendidas):
+ARMADILHAS (liÃ§Ãµes aprendidas):
   - Os JSONs de --config-provider/--registry-metadata devem ser UTF-8 SEM BOM.
     Com BOM, o CLI falha com "Parameter 'config_provider' must be in JSON format."
     (Set-Content -Encoding UTF8 do PowerShell 5 grava COM BOM; usar
@@ -2111,9 +2111,12 @@ Parametros FIXOS desta sessao (reutilizar sempre):
   - Tipo             : port forwarding (PORT_FORWARDING)
   - IP privado alvo  : 10.217.48.81
   - Porta            : 443 (APEX/Database Actions - acesso web; NAO e 1522 pois o uso e web)
-  - Chave PUBLICA    : C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key.pub
-      (ATENCAO: o arquivo .key no mesmo caminho e a chave PRIVADA - NAO usar/compartilhar;
-       a sessao usa a .pub. Chave privada correspondente: ...\ssh-key-2026-09-23.key)
+  - Chave PUBLICA    : caminho INFORMADO pelo usuario (nao e fixo). O bastion usa a .pub ao criar a sessao.
+      Como informar (ordem de prioridade): parametro -PubKey do apex_tunnel.ps1 ->
+      variavel de ambiente BGETRAB_SSH_PUB_KEY -> autodescoberta do par em %USERPROFILE%\.ssh.
+      Se so a privada for informada, assume-se "<priv>.pub".
+      (ATENCAO: a chave PRIVADA .key NAO deve ser compartilhada nem versionada; o bastion usa a .pub.
+       A privada e usada apenas localmente no comando ssh -i.)
   - TTL              : padrao (10800s / 3h), salvo pedido diferente.
 
 Comando de criacao (OCI CLI):
@@ -2147,7 +2150,7 @@ Template:
   ssh -i "<caminho-chave-privada>" -v -N -L 443:<IP-privado>:443 -p 22 <session-id>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
 
 Com os valores fixos do projeto:
-  ssh -i "C:\Users\angelo.paolino\OneDrive - Dataprev\Projeto Novo\ssh-key-2026-09-23.key" -v -N -L 443:10.217.48.81:443 -p 22 <SESSION_ID>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
+  ssh -i "<caminho-chave-privada>" -v -N -L 443:10.217.48.81:443 -p 22 <SESSION_ID>@host.bastion.sa-saopaulo-1.oci.oraclecloud.com
   (substituir <SESSION_ID> pelo id da sessao recem-criada)
 
 Diferencas vs o comando bruto do OCI (ssh-metadata.command): preencher <privateKey> com a .key,
@@ -2175,8 +2178,10 @@ O que faz:
   4. Abre o navegador em https://localhost/ords/_/landing (apos ~3s).
   5. Inicia o tunel SSH em 1o plano (segura o terminal; fechar/CTRL+C derruba o tunel).
 
-Parametros fixos embutidos: bastion DEV, Session-Angelo, IP 10.217.48.81, porta 443/443, TTL 3h,
-chave privada .key e publica .key.pub (caminhos do usuario), APEX_URL.
+Parametros fixos embutidos: bastion DEV, nome de sessao (default Session-APEX, perguntado),
+IP 10.217.48.81, porta 443/443, TTL 3h, APEX_URL.
+Chave SSH: NAO e fixa - informada via -PrivKey/-PubKey, env BGETRAB_SSH_PRIV_KEY/PUB_KEY,
+ou autodescoberta do par em %USERPROFILE%\.ssh.
 
 Login no APEX permanece MANUAL (nao automatizado - seguranca).
 Pontos de atencao: requer ssh (OpenSSH) no PATH; porta 443 privilegiada -> terminal Admin;
@@ -2441,7 +2446,7 @@ MAPA de NU_COMPET_MOV / DT_COMPETENCIA_MOVIMENTACAO no DARDO (grep):
   - L4841         : ltrim_blanks/rtrim_blanks (limpa espacos) OK
   - L4948         : replace_substr remove chr(123)/chr(125)/'/' OK
   - L3220 e L5199 QRY_RETIRA_CHAVES: *** PONTO DO BUG ***
-        NU_COMPET_MOV = ifthenelse( match_regex(...'^ñ...')=1, null,
+        NU_COMPET_MOV = ifthenelse( match_regex(...'^Ã±...')=1, null,
                                     substr(NU_COMPET_MOV,3,4) || substr(NU_COMPET_MOV,1,2) )
   - L12416 QRY_DADOS: DT_COMPETENCIA_MOVIMENTACAO DECIMAL(6,0) = ifthenelse(is_valid_int(...),
         to_decimal(...NU_COMPET_MOV...,0), 0)  <- correcao ja aplicada (CORRETA, mas recebe valor ja corrompido)
